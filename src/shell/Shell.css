@@ -1,0 +1,351 @@
+/* GAIA Shell — Component Styles */
+/* Canonical source: C19 (Color Doctrine), C21 (Interface and Shell Grammar) */
+
+@import './tokens.css';
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--surface-primary);
+  color: var(--pure-white);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Shell Layout ── */
+.gaia-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--surface-primary);
+}
+
+/* ── Interrupt Bar — C21 §3.8: always visible, never hidden ── */
+.interrupt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--surface-border);
+  padding: var(--space-2) var(--space-4);
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.shell-label {
+  font-size: var(--font-size-lg);
+  color: var(--gaia-green);
+  font-weight: 700;
+  letter-spacing: 0.15em;
+}
+
+.interrupt-controls {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.interrupt-btn {
+  background: var(--surface-primary);
+  border: 1px solid var(--surface-border);
+  color: var(--neutral-grey);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.interrupt-btn:hover { color: var(--signal-amber); border-color: var(--signal-amber); }
+.interrupt-btn.panic { color: var(--alert-red); border-color: var(--alert-red); }
+.interrupt-btn.panic:hover { background: color-mix(in srgb, var(--alert-red) 15%, transparent); }
+
+/* ── Shell Body ── */
+.shell-body {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── State Panel — C21 §3.1–3.7 ── */
+.state-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--surface-border);
+  overflow-y: auto;
+  border-right: 1px solid var(--surface-border);
+}
+
+.state-surface {
+  background: var(--surface-secondary);
+  flex-shrink: 0;
+}
+
+.surface-header {
+  font-size: var(--font-size-sm);
+  color: var(--doctrine-gold);
+  letter-spacing: 0.1em;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--surface-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.surface-body {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+/* ── Command Panel ── */
+.command-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#surface-parse {
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+/* ── Output Area ── */
+.output-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.shell-output {
+  background: var(--surface-secondary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.output-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.output-content {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.output-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  margin-top: var(--space-1);
+}
+
+.action-chip {
+  background: transparent;
+  border: 1px solid var(--atlas-blue);
+  color: var(--atlas-blue);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.action-chip:hover { background: color-mix(in srgb, var(--atlas-blue) 15%, transparent); }
+
+/* ── Confirmation Gate — C21 I-6 ── */
+.confirm-gate {
+  background: color-mix(in srgb, var(--alert-red) 10%, var(--surface-secondary));
+  border: 1px solid var(--alert-red);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 var(--space-4);
+}
+.confirm-gate.hidden { display: none; }
+
+.confirm-message { margin-bottom: var(--space-3); line-height: 1.6; }
+
+.confirm-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.confirm-actions button {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid var(--alert-red);
+  background: var(--alert-red);
+  color: var(--pure-white);
+}
+
+.confirm-actions .btn-secondary {
+  background: transparent;
+  color: var(--neutral-grey);
+  border-color: var(--surface-border);
+}
+
+/* ── Input Bar ── */
+.input-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--surface-border);
+  background: var(--surface-secondary);
+  flex-shrink: 0;
+}
+
+#shell-input {
+  flex: 1;
+  background: var(--surface-primary);
+  border: 1px solid var(--surface-border);
+  color: var(--pure-white);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-base);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+#shell-input:focus { border-color: var(--gaia-green); }
+
+#btn-run {
+  background: var(--gaia-green);
+  border: none;
+  color: var(--pure-white);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  letter-spacing: 0.05em;
+}
+#btn-run:hover { filter: brightness(1.15); }
+
+/* ── Key-Value Rows (State Surfaces) ── */
+.kv-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  margin-bottom: 3px;
+}
+.kv-key {
+  color: var(--neutral-grey);
+  min-width: 60px;
+  font-size: var(--font-size-sm);
+}
+.kv-val { color: var(--pure-white); }
+
+/* ── Tier Badges ── */
+.tier-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.tier-t0 { color: var(--neutral-grey); border: 1px solid var(--neutral-grey); }
+.tier-t1 { color: var(--atlas-blue);   border: 1px solid var(--atlas-blue); }
+.tier-t2 { color: var(--gaia-green);   border: 1px solid var(--gaia-green); }
+.tier-t3 { color: var(--doctrine-gold);border: 1px solid var(--doctrine-gold); }
+.tier-t4 { color: var(--identity-violet); border: 1px solid var(--identity-violet); }
+
+/* ── Tags ── */
+.tag {
+  display: inline-block;
+  font-size: var(--font-size-sm);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid currentColor;
+  opacity: 0.9;
+}
+
+/* ── Confidence tags ── */
+.conf-high    { color: var(--gaia-green); }
+.conf-medium  { color: var(--signal-amber); }
+.conf-low     { color: var(--neutral-grey); }
+.conf-unknown { color: var(--alert-red); }
+
+/* ── Status tags ── */
+.status-success { color: var(--gaia-green); }
+.status-partial { color: var(--signal-amber); }
+.status-failed  { color: var(--alert-red); }
+.status-pending { color: var(--neutral-grey); }
+.status-blocked { color: var(--alert-red); }
+
+/* ── Misc text utilities ── */
+.muted  { color: var(--neutral-grey); }
+.amber  { color: var(--signal-amber); }
+.alert  { color: var(--alert-red); }
+.online { color: var(--gaia-green); }
+.offline { color: var(--signal-amber); }
+
+/* ── Command echo ── */
+.cmd-echo {
+  color: var(--atlas-blue);
+  font-weight: 500;
+}
+.prompt-char { color: var(--gaia-green); margin-right: var(--space-2); }
+
+/* ── Shell error ── */
+.shell-error {
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--alert-red);
+  line-height: 1.6;
+}
+
+/* ── System line ── */
+.system-line {
+  font-size: var(--font-size-sm);
+  padding: var(--space-1) var(--space-3);
+  border-left: 2px solid var(--surface-border);
+}
+.system-line.amber { border-color: var(--signal-amber); color: var(--signal-amber); }
+.system-line.alert { border-color: var(--alert-red); color: var(--alert-red); }
+
+/* ── Audit rows ── */
+.audit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: 3px;
+  align-items: center;
+}
+.audit-verb { color: var(--atlas-blue); }
+
+/* ── Prompt ── */
+.prompt {
+  font-weight: 700;
+  min-width: 36px;
+}
+
+/* ── Inline button ── */
+.inline-btn {
+  background: none;
+  border: 1px solid var(--surface-border);
+  color: var(--neutral-grey);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.inline-btn:hover { color: var(--pure-white); border-color: var(--pure-white); }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--surface-primary); }
+::-webkit-scrollbar-thumb { background: var(--surface-border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--neutral-grey); }
