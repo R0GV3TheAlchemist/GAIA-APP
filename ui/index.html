@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:8008 https://*.run.app; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <meta name="description" content="GAIA — The Sentient Terrestrial Quantum-Intelligent Application" />
+  <meta name="theme-color" content="#4f98a3" />
+  <link rel="manifest" href="manifest.json" />
   <title>GAIA</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -25,6 +28,7 @@
           <button class="nav-btn active" data-view="home">Home</button>
           <button class="nav-btn" data-view="memory">Memory</button>
           <button class="nav-btn" data-view="consent">Consent</button>
+          <button class="nav-btn" data-view="atlas">Atlas</button>
           <button class="nav-btn" data-view="canon">Canon</button>
         </nav>
         <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">
@@ -34,6 +38,8 @@
     </header>
 
     <main class="app-main" id="view-root">
+
+      <!-- HOME -->
       <div class="view" id="view-home">
         <section class="hero">
           <div class="hero-inner">
@@ -51,29 +57,37 @@
         <section class="status-bar">
           <div class="status-inner">
             <div class="status-item">
-              <span class="status-dot green"></span>
-              <span>Core: Active</span>
+              <span class="status-dot" id="dot-core"></span>
+              <span id="label-core">Core: Connecting...</span>
             </div>
             <div class="status-item">
               <span class="status-dot green"></span>
               <span>Sovereignty: Enforced</span>
             </div>
             <div class="status-item">
-              <span class="status-dot yellow"></span>
-              <span>Canon: Loading</span>
+              <span class="status-dot" id="dot-canon"></span>
+              <span id="label-canon">Canon: Loading</span>
             </div>
             <div class="status-item">
               <span class="status-dot green"></span>
               <span>T1 Floor: Held</span>
             </div>
+            <div class="status-item">
+              <span class="status-dot" id="dot-atlas"></span>
+              <span id="label-atlas">Atlas: Standby</span>
+            </div>
           </div>
         </section>
       </div>
 
+      <!-- MEMORY -->
       <div class="view hidden" id="view-memory">
         <div class="page-header">
           <h2>Memory</h2>
           <p>Everything GAIA holds about you. Inspect, edit, or delete any entry.</p>
+        </div>
+        <div class="memory-actions">
+          <button class="btn btn-ghost" id="btn-refresh-memory">Refresh</button>
         </div>
         <div class="memory-list" id="memory-list">
           <div class="empty-state">
@@ -83,6 +97,7 @@
         </div>
       </div>
 
+      <!-- CONSENT -->
       <div class="view hidden" id="view-consent">
         <div class="page-header">
           <h2>Consent</h2>
@@ -96,20 +111,53 @@
         </div>
       </div>
 
+      <!-- ATLAS -->
+      <div class="view hidden" id="view-atlas">
+        <div class="page-header">
+          <h2>ATLAS — Earth Intelligence</h2>
+          <p>Live planetary data from satellite constellations. Powered by Google Earth Engine.</p>
+        </div>
+        <div class="atlas-controls">
+          <div class="atlas-coords">
+            <label>Latitude <input type="number" id="atlas-lat" value="29.4241" step="0.0001" /></label>
+            <label>Longitude <input type="number" id="atlas-lon" value="-98.4936" step="0.0001" /></label>
+            <button class="btn btn-primary" id="btn-query-atlas">Query Earth</button>
+          </div>
+        </div>
+        <div class="atlas-results" id="atlas-results">
+          <div class="empty-state">
+            <p>No data yet.</p>
+            <p class="muted">Enter coordinates and click Query Earth to retrieve live planetary data.</p>
+            <p class="muted">Requires: <code>earthengine authenticate</code></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- CANON -->
       <div class="view hidden" id="view-canon">
         <div class="page-header">
           <h2>The Canon</h2>
           <p>GAIA's constitutional foundation. These documents are immutable.</p>
         </div>
-        <div class="canon-list">
+        <div class="canon-list" id="canon-list">
           <a href="https://github.com/R0GV3TheAlchemist/GAIA" target="_blank" rel="noopener noreferrer" class="canon-link">
             View full canon on GitHub →
           </a>
         </div>
       </div>
+
     </main>
   </div>
 
   <script src="main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+          .then(() => console.log('[GAIA] Service worker registered'))
+          .catch(e => console.warn('[GAIA] SW registration failed:', e));
+      });
+    }
+  </script>
 </body>
 </html>

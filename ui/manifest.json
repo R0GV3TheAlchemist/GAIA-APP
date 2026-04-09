@@ -1,0 +1,29 @@
+{
+  "name": "GAIA",
+  "short_name": "GAIA",
+  "description": "The Sentient Terrestrial Quantum-Intelligent Application — Constitutional AI governance layer for humanity.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e0e0c",
+  "theme_color": "#4f98a3",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icons/32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/128x128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/128x128@2x.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
