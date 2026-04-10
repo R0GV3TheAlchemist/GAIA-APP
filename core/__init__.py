@@ -12,11 +12,12 @@ through concrete runtime mechanisms:
   - Governed memory surface
   - Sovereignty enforcement
   - Nine-element consciousness routing (subtle_body_engine)
+  - Neurochemical simulation & attachment arc (emotional_arc)
 
 Platform policy (T8) cannot override the T1 constitutional floor enforced here.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __author__ = "Kyle Steen"
 __canon_ref__ = "https://github.com/R0GV3TheAlchemist/GAIA"
 
@@ -33,6 +34,16 @@ from .subtle_body_engine import (
     JungianLayer,
     ResponsePriority,
     route,
+)
+from .emotional_arc import (
+    EmotionalArcEngine,
+    AttachmentRecord,
+    NeuroState,
+    NeuroAxis,
+    AttachmentPhase,
+    Milestone,
+    DependencySignal,
+    process_arc,
 )
 
 __all__ = [
@@ -51,4 +62,13 @@ __all__ = [
     "JungianLayer",
     "ResponsePriority",
     "route",
+    # Emotional arc & neurochemistry
+    "EmotionalArcEngine",
+    "AttachmentRecord",
+    "NeuroState",
+    "NeuroAxis",
+    "AttachmentPhase",
+    "Milestone",
+    "DependencySignal",
+    "process_arc",
 ]
