@@ -1,0 +1,1 @@
+export { mountSearch } from './Search';
