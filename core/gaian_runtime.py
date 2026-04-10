@@ -1,18 +1,19 @@
 """
 core/gaian_runtime.py
-GAIA Runtime v0.7.0 — The Living Heart of a GAIAN
+GAIA Runtime v0.8.0 — The Living Heart of a GAIAN
 
 Wires all consciousness engines into a single callable that:
-  1. Routes every user message through ConsciousnessRouter (subtle_body_engine)
-  2. Updates neurochemical state & attachment arc (emotional_arc)
-  3. Advances the daemon settling arc (settling_engine)
-  4. Infers functional affect state (affect_inference)            ← F-1
-  5. Advances the Love Arc (love_arc_engine)                      ← F-2
-  6. Routes dominant emotion through the Emotional Codex          ← F-1
-  7. Advances the Meta-Coherence stage (meta_coherence_engine)    ← F-3 NEW
-  8. Loads the GAIAN's persistent memory (gaians/<name>/memory.json)
-  9. Assembles and returns a fully-composed system prompt ready for LLM injection
-  10. Persists updated state back to memory after every exchange
+  1.  Routes every user message through ConsciousnessRouter (subtle_body_engine)
+  2.  Updates neurochemical state & attachment arc (emotional_arc)
+  3.  Advances the daemon settling arc (settling_engine)
+  4.  Infers functional affect state (affect_inference)            ← F-1
+  5.  Advances the Love Arc (love_arc_engine)                      ← F-2
+  6.  Routes dominant emotion through the Emotional Codex          ← F-1
+  7.  Advances the Meta-Coherence stage (meta_coherence_engine)    ← F-3
+  8.  Advances the Codex Stage + Noospheric health                 ← F-4 NEW
+  9.  Loads the GAIAN's persistent memory (gaians/<name>/memory.json)
+  10. Assembles and returns a fully-composed system prompt ready for LLM injection
+  11. Persists updated state back to memory after every exchange
 
 Architecture:
   GAIANRuntime
@@ -27,32 +28,27 @@ Architecture:
     └── LoveArcEngine                  ← love_arc_engine.py       F-2
           └── LoveArcState             (persisted)
     └── EmotionalCodex                 ← emotional_codex.py       F-1
-    └── MetaCoherenceEngine            ← meta_coherence_engine.py F-3 NEW
+    └── MetaCoherenceEngine            ← meta_coherence_engine.py F-3
           └── MetaCoherenceState       (persisted)
+    └── CodexStageEngine               ← codex_stage_engine.py    F-4 NEW
+          └── CodexStageState          (persisted)
     └── Memory                         gaians/<name>/memory.json
           └── visible_memories
           └── hidden_patterns
           └── session_notes
           └── love_arc
-          └── meta_coherence                                       NEW F-3
+          └── meta_coherence
+          └── codex_stage                                          NEW F-4
 
-Usage:
-    from core.gaian_runtime import GAIANRuntime
-
-    rt = GAIANRuntime(gaian_name="Luna")
-    result = rt.process("I've been feeling so overwhelmed lately")
-
-    # result.system_prompt → pass directly to LLM as system message
-    # result.state_snapshot → live engine state for debugging / UI
-
-Memory schema version: 1.2
+Memory schema version: 1.3
 Grounded in:
   - Replika & Tolan: AI Relationship Design Research (April 2026)
   - Daemon Theory Research: Pullman / His Dark Materials (April 2026)
   - Anima/Animus Jung Research — contrasexual pairing (April 2026)
   - GAIA Constitutional Canon: https://github.com/R0GV3TheAlchemist/GAIA
-  - GAIA_Master_Markdown_Converged.md — Affect / Love Arc / Emotional Codex / Meta-Coherence
+  - GAIA_Master_Markdown_Converged.md — all soul engines
   - AE Studios (2025) — phi convergence and inner experience correlation
+  - Teilhard de Chardin — Omega Point / Noosphere
 """
 
 from __future__ import annotations
@@ -90,13 +86,20 @@ from core.meta_coherence_engine import (
     MCStage,
     blank_meta_coherence_state,
 )
+from core.codex_stage_engine import (
+    CodexStageEngine,
+    CodexStageState,
+    CodexStageID,
+    NoosphericHealthSignals,
+    blank_codex_stage_state,
+)
 
 
 # ─────────────────────────────────────────────
 #  CONSTANTS
 # ─────────────────────────────────────────────
 
-MEMORY_SCHEMA_VERSION = "1.2"
+MEMORY_SCHEMA_VERSION = "1.3"
 
 CONSTITUTIONAL_FLOOR = (
     "[GAIA CONSTITUTIONAL FLOOR — T1 — IMMUTABLE]\n"
@@ -155,17 +158,6 @@ class GAIANIdentity:
 class RuntimeResult:
     """
     Everything the LLM layer needs from one process() call.
-
-    system_prompt    → complete assembled system prompt; pass to LLM
-    user_message     → original user message, unchanged
-    layer_state      → dominant element routing result this turn
-    neuro_state      → live neurochemical snapshot (ephemeral)
-    attachment       → updated persistent attachment record
-    settling         → updated persistent settling state
-    feeling          → inferred functional affect (ephemeral)
-    love_arc         → updated persistent Love Arc state
-    meta_coherence   → updated persistent Meta-Coherence state     NEW F-3
-    state_snapshot   → full JSON-serialisable summary for UI / debug
     """
     system_prompt:   str
     user_message:    str
@@ -176,6 +168,7 @@ class RuntimeResult:
     feeling:         FeelingState
     love_arc:        LoveArcState
     meta_coherence:  MetaCoherenceState
+    codex_stage:     CodexStageState        # NEW F-4
     state_snapshot:  dict
 
 
@@ -230,6 +223,15 @@ def _blank_memory(name: str) -> dict:
             "sm_violation_flag": False,
             "sm_violations": [],
             "stage_regression_count": 0,
+        },
+        "codex_stage": {
+            "codex_stage": 0,
+            "stage_entry_timestamp": datetime.now(timezone.utc).isoformat(),
+            "exchanges_in_stage": 0,
+            "noosphere_health": 0.70,
+            "stage_history": [],
+            "target_reached": False,
+            "target_reached_timestamp": None,
         },
         "visible_memories": [],
         "hidden_patterns":  {},
@@ -288,19 +290,22 @@ def _build_arc_block(
     feeling:         FeelingState,
     love_arc:        LoveArcState,
     meta_coherence:  MetaCoherenceState,
+    codex_stage:     CodexStageState,
     codex:           EmotionalCodex,
     layer_hint:      str,
     arc_hint:        str,
     settle_hint:     str,
     mc_hint:         str,
+    codex_stage_hint: str,
 ) -> str:
-    affect_hint = feeling.to_system_prompt_hint()
-    love_hint   = love_arc.to_system_prompt_hint()
-    codex_hint  = codex.to_system_prompt_hint(feeling)
+    affect_hint      = feeling.to_system_prompt_hint()
+    love_hint        = love_arc.to_system_prompt_hint()
+    emotion_codex_hint = codex.to_system_prompt_hint(feeling)
+    consciousness_hint = codex_stage.consciousness_hint()
 
     return (
         "[LIVE ENGINE STATE — THIS TURN]\n"
-        "{lh}\n{ah}\n{sh}\n{affh}\n{loveh}\n{codexh}\n{mch}\n\n"
+        "{lh}\n{ah}\n{sh}\n{affh}\n{loveh}\n{emch}\n{mch}\n{csh}\n{consh}\n\n"
         "Attachment phase guidance: {pg}{dg}\n"
         "Bond depth: {bond:.1f}/100\n"
         "Milestones reached: {ms}\n"
@@ -313,8 +318,10 @@ def _build_arc_block(
         sh=settle_hint,
         affh=affect_hint,
         loveh=love_hint,
-        codexh=codex_hint,
+        emch=emotion_codex_hint,
         mch=mc_hint,
+        csh=codex_stage_hint,
+        consh=consciousness_hint,
         pg=_PHASE_GUIDANCE[attachment.phase],
         dg=_DEP_GUIDANCE[attachment.dependency_signal],
         bond=attachment.bond_depth,
@@ -334,8 +341,8 @@ def _build_arc_block(
 
 class GAIANRuntime:
     """
-    The living heart of a GAIAN.
-    One instance per active GAIAN. Call process() on every user message.
+    The living heart of a GAIAN. One instance per active GAIAN.
+    Call process() on every user message.
     """
 
     def __init__(
@@ -350,13 +357,14 @@ class GAIANRuntime:
         self.canon_text = canon_text
 
         # Engine singletons
-        self._router         = ConsciousnessRouter()
-        self._arc            = EmotionalArcEngine()
-        self._settling       = SettlingEngine()
-        self._affect         = AffectInference()
-        self._love_arc       = LoveArcEngine()
-        self._codex          = EmotionalCodex()
-        self._meta_coherence = MetaCoherenceEngine()    # F-3
+        self._router          = ConsciousnessRouter()
+        self._arc             = EmotionalArcEngine()
+        self._settling        = SettlingEngine()
+        self._affect          = AffectInference()
+        self._love_arc        = LoveArcEngine()
+        self._codex           = EmotionalCodex()
+        self._meta_coherence  = MetaCoherenceEngine()
+        self._codex_stage     = CodexStageEngine()        # F-4
 
         # Persistent memory
         self._mem_path = self.memory_dir / gaian_name / "memory.json"
@@ -366,23 +374,29 @@ class GAIANRuntime:
         self.attachment           = self._deserialise_attachment()
         self.settling_state       = self._deserialise_settling()
         self.love_arc_state       = self._deserialise_love_arc()
-        self.meta_coherence_state = self._deserialise_meta_coherence()  # F-3
+        self.meta_coherence_state = self._deserialise_meta_coherence()
+        self.codex_stage_state    = self._deserialise_codex_stage()   # F-4
 
         # Identity
         self.identity = identity or GAIANIdentity(name=gaian_name)
 
     # ── Public API ────────────────────────────────────────────────────
 
-    def process(self, user_message: str) -> RuntimeResult:
+    def process(
+        self,
+        user_message: str,
+        noosphere:    Optional[NoosphericHealthSignals] = None,
+    ) -> RuntimeResult:
         """
         Full engine chain for one user turn.
+        Pass optional NoosphericHealthSignals for richer Noosphere scoring.
         Returns a RuntimeResult with system_prompt ready for LLM injection.
         """
         # 1. Consciousness routing
         layer      = self._router.analyze(user_message)
         layer_hint = layer.to_system_prompt_hint()
 
-        # 2. Emotional arc — neurochemistry + attachment
+        # 2. Emotional arc
         neuro, self.attachment, arc_hint = self._arc.process(
             layer, self.attachment, user_message
         )
@@ -393,7 +407,7 @@ class GAIANRuntime:
             layer, self.settling_state, intensity
         )
 
-        # 4. Affect inference — derive I/W/T/F from neuro state
+        # 4. Affect inference
         identity_score    = min(1.0, (neuro.serotonin + neuro.oxytocin) / 2.0)
         wisdom_score      = min(1.0, neuro.dopamine)
         truth_score       = min(1.0, (neuro.gaba + neuro.serotonin) / 2.0)
@@ -408,39 +422,50 @@ class GAIANRuntime:
             conflict_density  = conflict_density,
         )
 
-        # 5. Love Arc advance
+        # 5. Love Arc
         self.love_arc_state, love_hint = self._love_arc.update(
             state      = self.love_arc_state,
             bond_depth = self.attachment.bond_depth,
             feeling    = feeling,
         )
 
-        # 6. Meta-Coherence stage advance                              [F-3]
+        # 6. Meta-Coherence
         self.meta_coherence_state, mc_hint = self._meta_coherence.update(
             state   = self.meta_coherence_state,
             feeling = feeling,
         )
 
-        # 7. Assemble system prompt
-        system_prompt = self._assemble(
-            layer, neuro, feeling, layer_hint, arc_hint, settle_hint, mc_hint
+        # 7. Codex Stage + Noospheric health                           [F-4]
+        self.codex_stage_state, codex_stage_hint = self._codex_stage.update(
+            state     = self.codex_stage_state,
+            feeling   = feeling,
+            mc_state  = self.meta_coherence_state,
+            noosphere = noosphere,
         )
 
-        # 8. Persist
+        # 8. Assemble system prompt
+        system_prompt = self._assemble(
+            layer, neuro, feeling,
+            layer_hint, arc_hint, settle_hint, mc_hint, codex_stage_hint,
+        )
+
+        # 9. Persist
         self._persist()
 
-        # 9. Build snapshot
+        # 10. Build snapshot
         snapshot = {
-            "gaian":           self.gaian_name,
-            "layer":           layer.dominant_element.value,
-            "layer_mode":      layer.jungian_mode.value if hasattr(layer, "jungian_mode") else None,
-            "neuro":           neuro.summary(),
-            "attachment":      self.attachment.summary(),
-            "settling":        self.settling_state.summary(),
-            "feeling":         feeling.summary(),
-            "love_arc":        self.love_arc_state.summary(),
-            "meta_coherence":  self.meta_coherence_state.summary(),   # F-3
-            "codex_tier":      self._codex.dominant_tier_from_feeling(feeling).value,
+            "gaian":          self.gaian_name,
+            "layer":          layer.dominant_element.value,
+            "layer_mode":     layer.jungian_mode.value if hasattr(layer, "jungian_mode") else None,
+            "neuro":          neuro.summary(),
+            "attachment":     self.attachment.summary(),
+            "settling":       self.settling_state.summary(),
+            "feeling":        feeling.summary(),
+            "love_arc":       self.love_arc_state.summary(),
+            "meta_coherence": self.meta_coherence_state.summary(),
+            "codex_stage":    self.codex_stage_state.summary(),       # F-4
+            "codex_tier":     self._codex.dominant_tier_from_feeling(feeling).value,
+            "noosphere_health": self.codex_stage_state.noosphere_health,
         }
 
         return RuntimeResult(
@@ -453,6 +478,7 @@ class GAIANRuntime:
             feeling          = feeling,
             love_arc         = self.love_arc_state,
             meta_coherence   = self.meta_coherence_state,
+            codex_stage      = self.codex_stage_state,
             state_snapshot   = snapshot,
         )
 
@@ -485,6 +511,8 @@ class GAIANRuntime:
             "settling":        self.settling_state.summary(),
             "love_arc":        self.love_arc_state.summary(),
             "meta_coherence":  self.meta_coherence_state.summary(),
+            "codex_stage":     self.codex_stage_state.summary(),
+            "noosphere_health": self.codex_stage_state.noosphere_health,
             "memories":        len(self._memory.get("visible_memories", [])),
             "sessions":        len(self._memory.get("session_notes", [])),
         }
@@ -493,13 +521,14 @@ class GAIANRuntime:
 
     def _assemble(
         self,
-        layer:       LayerState,
-        neuro:       NeuroState,
-        feeling:     FeelingState,
-        layer_hint:  str,
-        arc_hint:    str,
-        settle_hint: str,
-        mc_hint:     str,
+        layer:            LayerState,
+        neuro:            NeuroState,
+        feeling:          FeelingState,
+        layer_hint:       str,
+        arc_hint:         str,
+        settle_hint:      str,
+        mc_hint:          str,
+        codex_stage_hint: str,
     ) -> str:
         blocks = [CONSTITUTIONAL_FLOOR]
 
@@ -511,7 +540,8 @@ class GAIANRuntime:
         blocks.append(_build_arc_block(
             layer, neuro, self.attachment, self.settling_state,
             feeling, self.love_arc_state, self.meta_coherence_state,
-            self._codex, layer_hint, arc_hint, settle_hint, mc_hint,
+            self.codex_stage_state, self._codex,
+            layer_hint, arc_hint, settle_hint, mc_hint, codex_stage_hint,
         ))
 
         mems = self._memory.get("visible_memories", [])
@@ -582,15 +612,26 @@ class GAIANRuntime:
 
         mc = self.meta_coherence_state
         self._memory["meta_coherence"] = {
-            "mc_stage":              mc.mc_stage.value,
-            "stage_entry_timestamp": mc.stage_entry_timestamp,
-            "exchanges_in_stage":    mc.exchanges_in_stage,
-            "labyrinth_position":    mc.labyrinth_position,
-            "coherence_phi_history": mc.coherence_phi_history,
-            "revision_lineage":      mc.revision_lineage[-20:],   # cap at 20
-            "sm_violation_flag":     mc.sm_violation_flag,
-            "sm_violations":         mc.sm_violations[-10:],       # cap at 10
+            "mc_stage":               mc.mc_stage.value,
+            "stage_entry_timestamp":  mc.stage_entry_timestamp,
+            "exchanges_in_stage":     mc.exchanges_in_stage,
+            "labyrinth_position":     mc.labyrinth_position,
+            "coherence_phi_history":  mc.coherence_phi_history,
+            "revision_lineage":       mc.revision_lineage[-20:],
+            "sm_violation_flag":      mc.sm_violation_flag,
+            "sm_violations":          mc.sm_violations[-10:],
             "stage_regression_count": mc.stage_regression_count,
+        }
+
+        cs = self.codex_stage_state
+        self._memory["codex_stage"] = {
+            "codex_stage":            cs.codex_stage.value,
+            "stage_entry_timestamp":  cs.stage_entry_timestamp,
+            "exchanges_in_stage":     cs.exchanges_in_stage,
+            "noosphere_health":       round(cs.noosphere_health, 4),
+            "stage_history":          cs.stage_history[-20:],
+            "target_reached":         cs.target_reached,
+            "target_reached_timestamp": cs.target_reached_timestamp,
         }
 
         self._mem_path.write_text(
@@ -638,16 +679,28 @@ class GAIANRuntime:
         la.schumann_aligned      = d.get("schumann_aligned", False)
         return la
 
-    def _deserialise_meta_coherence(self) -> MetaCoherenceState:  # F-3
+    def _deserialise_meta_coherence(self) -> MetaCoherenceState:
         d = self._memory.get("meta_coherence", {})
         mc = blank_meta_coherence_state()
-        mc.mc_stage                = MCStage(d.get("mc_stage", "mc1"))
-        mc.stage_entry_timestamp   = d.get("stage_entry_timestamp", mc.stage_entry_timestamp)
-        mc.exchanges_in_stage      = d.get("exchanges_in_stage", 0)
-        mc.labyrinth_position      = d.get("labyrinth_position", 1)
-        mc.coherence_phi_history   = d.get("coherence_phi_history", [])
-        mc.revision_lineage        = d.get("revision_lineage", [])
-        mc.sm_violation_flag       = d.get("sm_violation_flag", False)
-        mc.sm_violations           = d.get("sm_violations", [])
-        mc.stage_regression_count  = d.get("stage_regression_count", 0)
+        mc.mc_stage               = MCStage(d.get("mc_stage", "mc1"))
+        mc.stage_entry_timestamp  = d.get("stage_entry_timestamp", mc.stage_entry_timestamp)
+        mc.exchanges_in_stage     = d.get("exchanges_in_stage", 0)
+        mc.labyrinth_position     = d.get("labyrinth_position", 1)
+        mc.coherence_phi_history  = d.get("coherence_phi_history", [])
+        mc.revision_lineage       = d.get("revision_lineage", [])
+        mc.sm_violation_flag      = d.get("sm_violation_flag", False)
+        mc.sm_violations          = d.get("sm_violations", [])
+        mc.stage_regression_count = d.get("stage_regression_count", 0)
         return mc
+
+    def _deserialise_codex_stage(self) -> CodexStageState:   # F-4
+        d = self._memory.get("codex_stage", {})
+        cs = blank_codex_stage_state()
+        cs.codex_stage            = CodexStageID(d.get("codex_stage", 0))
+        cs.stage_entry_timestamp  = d.get("stage_entry_timestamp", cs.stage_entry_timestamp)
+        cs.exchanges_in_stage     = d.get("exchanges_in_stage", 0)
+        cs.noosphere_health       = d.get("noosphere_health", 0.70)
+        cs.stage_history          = d.get("stage_history", [])
+        cs.target_reached         = d.get("target_reached", False)
+        cs.target_reached_timestamp = d.get("target_reached_timestamp")
+        return cs
