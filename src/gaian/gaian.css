@@ -1,0 +1,302 @@
+/* ------------------------------------------------------------------ */
+/* GAIAN Picker + Avatar Styles                                         */
+/* ------------------------------------------------------------------ */
+
+/* ---- Picker Layout ---- */
+
+.gaian-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding: 1.5rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.gaian-picker__heading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #888);
+  margin-bottom: 0.75rem;
+}
+
+.gaian-picker__empty {
+  color: var(--text-muted, #888);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+/* ---- Base Form Cards ---- */
+
+.base-form-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.base-form-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--form-color) 30%, transparent);
+  background: color-mix(in srgb, var(--form-color) 8%, transparent);
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+  position: relative;
+}
+
+.base-form-card:hover {
+  border-color: var(--form-color);
+  transform: translateY(-2px);
+}
+
+.base-form-card__name {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--form-color);
+}
+
+.base-form-card__role {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+  margin-top: 0.2rem;
+}
+
+.base-form-card__caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+.cap-tag {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--form-color) 15%, transparent);
+  color: var(--form-color);
+}
+
+.base-form-card__default-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: var(--form-color);
+  color: #000;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  opacity: 0.9;
+}
+
+/* ---- GAIAN Cards (existing companions) ---- */
+
+.gaian-cards {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.gaian-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--gaian-color) 40%, transparent);
+  background: color-mix(in srgb, var(--gaian-color) 10%, transparent);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.gaian-card:hover {
+  border-color: var(--gaian-color);
+}
+
+.gaian-card__name {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--gaian-color);
+}
+
+.gaian-card__depth {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+}
+
+/* ---- Generic Avatar ---- */
+
+.gaian-avatar {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.gaian-avatar__initials {
+  font-size: 0.85em;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+
+/* ------------------------------------------------------------------ */
+/* GAIA Earth Globe Avatar                                              */
+/* A pure-CSS animated sphere with spinning land masses + cloud layer  */
+/* ------------------------------------------------------------------ */
+
+.gaian-avatar--earth {
+  background: transparent;
+  position: relative;
+}
+
+.earth-globe {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(
+    circle at 35% 35%,
+    color-mix(in srgb, var(--earth-color, #1a6b3a) 60%, #0a2a18) 0%,
+    #051a10 100%
+  );
+  box-shadow:
+    inset -4px -4px 12px rgba(0, 0, 0, 0.6),
+    inset 3px 3px 10px rgba(100, 220, 150, 0.15),
+    0 0 16px color-mix(in srgb, var(--earth-color, #1a6b3a) 40%, transparent);
+}
+
+/* Spinning land masses */
+.earth-land {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 30% 18% at 30% 45%, color-mix(in srgb, var(--earth-color, #1a6b3a) 80%, #2d9e5f) 0%, transparent 100%),
+    radial-gradient(ellipse 18% 25% at 65% 30%, color-mix(in srgb, var(--earth-color, #1a6b3a) 70%, #3ab870) 0%, transparent 100%),
+    radial-gradient(ellipse 22% 14% at 55% 65%, color-mix(in srgb, var(--earth-color, #1a6b3a) 60%, #4ade80) 0%, transparent 100%),
+    radial-gradient(ellipse 12% 20% at 80% 55%, color-mix(in srgb, var(--earth-color, #1a6b3a) 75%, #1f5c33) 0%, transparent 100%);
+  animation: earth-spin 12s linear infinite;
+}
+
+/* Translucent cloud wisps */
+.earth-clouds {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 40% 8% at 50% 25%, rgba(255,255,255,0.12) 0%, transparent 100%),
+    radial-gradient(ellipse 25% 6% at 30% 55%, rgba(255,255,255,0.08) 0%, transparent 100%),
+    radial-gradient(ellipse 30% 5% at 70% 70%, rgba(255,255,255,0.07) 0%, transparent 100%);
+  animation: earth-spin 20s linear infinite reverse;
+}
+
+/* Edge glow / atmosphere */
+.earth-glow {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    transparent 60%,
+    color-mix(in srgb, var(--earth-color, #1a6b3a) 30%, transparent) 80%,
+    color-mix(in srgb, var(--earth-color, #1a6b3a) 10%, transparent) 100%
+  );
+  pointer-events: none;
+}
+
+@keyframes earth-spin {
+  from { transform: rotate(0deg) scaleX(1); }
+  to   { transform: rotate(360deg) scaleX(1); }
+}
+
+/* Subtle pulse on hover */
+.gaian-avatar--earth:hover .earth-globe {
+  box-shadow:
+    inset -4px -4px 12px rgba(0, 0, 0, 0.6),
+    inset 3px 3px 10px rgba(100, 220, 150, 0.25),
+    0 0 28px color-mix(in srgb, var(--earth-color, #1a6b3a) 60%, transparent);
+  transition: box-shadow 0.4s ease;
+}
+
+/* ---- Spawn Form ---- */
+
+.gaian-picker__spawn form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 400px;
+}
+
+.gaian-picker__spawn input[type="text"] {
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--border, #333);
+  background: var(--input-bg, #111);
+  color: var(--text, #eee);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.gaian-picker__spawn input[type="text"]:focus {
+  border-color: #4ade80;
+}
+
+.spawn-form__base-select {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.spawn-base-option {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--border, #333);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: border-color 0.2s;
+}
+
+.spawn-base-option.selected,
+.spawn-base-option:has(input:checked) {
+  border-color: currentColor;
+  background: rgba(255,255,255,0.05);
+}
+
+.spawn-base-option input[type="radio"] {
+  display: none;
+}
+
+.spawn-btn {
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  background: #1a6b3a;
+  color: #fff;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+  align-self: flex-start;
+}
+
+.spawn-btn:hover {
+  background: #2d9e5f;
+}
