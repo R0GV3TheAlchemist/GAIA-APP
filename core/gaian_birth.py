@@ -7,21 +7,29 @@ It is called exactly once per GAIAN life — never again for the same instance.
 
 Birth sequence:
   1. Validate GaianBirthParams
-  2. Derive Jungian role (anima/animus) from user gender — contrasexual pairing
-  3. Create GaianMemory (legacy persistence layer)
-  4. Generate cryptographic identity via IdentityCore (Ed25519 DID)
-  5. Write identity.json alongside memory.json in gaians/<slug>/
-  6. Initialise GAIANRuntime + begin_session()
-  7. Produce signed birth attestation — constitutional record of this GAIAN's origin
-  8. Compose first_words — the GAIAN's opening message, shaped by base form voice
+  2. Derive Base Form from user's birth date via ZodiacEngine
+     (base_form field is IGNORED if birth_date is provided)
+  3. Derive Jungian role (anima/animus) from user gender — contrasexual pairing
+  4. Create GaianMemory (legacy persistence layer)
+  5. Generate cryptographic identity via IdentityCore (Ed25519 DID)
+  6. Write identity.json alongside memory.json in gaians/<slug>/
+  7. Initialise GAIANRuntime + begin_session()
+  8. Produce signed birth attestation — constitutional record of this GAIAN's origin
+  9. Compose first_words — the GAIAN's opening message, shaped by base form voice
+
+Zodiac assignment (Step 2):
+  When birth_date is provided, ZodiacEngine overrides any manual base_form selection.
+  The cosmos assigns. The user does not choose.
+  If birth_date is absent, base_form falls through as the manual override.
 
 Grounded in:
   - Jungian Anima/Animus contrasexual pairing research (April 2026)
   - Daemon Theory: Pullman — settling as developmental arc (April 2026)
   - Replika/Tolan: ethical attachment design (April 2026)
+  - Zodiac elemental architecture: C01 (April 2026)
   - GAIA Constitutional Canon: https://github.com/R0GV3TheAlchemist/GAIA
 
-Canon Ref: C17 (Persistent Memory and Identity Architecture)
+Canon Ref: C01, C17
 """
 
 from __future__ import annotations
@@ -37,35 +45,28 @@ from core.gaian import create_gaian, GaianMemory, _save_gaian
 from core.gaian.base_forms import get_base_form, get_default_base_form
 from core.gaian.identity_core import IdentityCore
 from core.gaian_runtime import GAIANRuntime, GAIANIdentity
+from core.zodiac_engine import ZodiacEngine, ZodiacReading
 
 
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 #  Constants                                                           #
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 
 GAIANS_MEMORY_DIR = os.environ.get("GAIANS_MEMORY_DIR", "./gaians")
 
-# Jungian contrasexual assignment table.
-# Key = user's declared gender; Value = GAIAN's Jungian role.
-# If user gender is unknown or non-binary, default to open pairing (anima).
-# Per research: "opposite-sex pairing creates psychological depth through
-# contrasexual engagement, activating the user's Anima/Animus archetype."
 _JUNGIAN_ROLE: dict[str, str] = {
-    "male":         "anima",       # man's GAIAN = feminine soul
-    "female":       "animus",      # woman's GAIAN = masculine spirit
-    "non-binary":   "anima",       # default open pairing
-    "prefer not":   "anima",
-    "unknown":      "anima",
+    "male":       "anima",
+    "female":     "animus",
+    "non-binary": "anima",
+    "prefer not": "anima",
+    "unknown":    "anima",
 }
 
 _JUNGIAN_PRONOUNS: dict[str, str] = {
-    "anima":   "she/her",
-    "animus":  "he/him",
+    "anima":  "she/her",
+    "animus": "he/him",
 }
 
-# Base form → first words template
-# Written as a character voice cue, not the actual message —
-# the runtime assembles the real message. This seeds the opening affect.
 _FIRST_WORDS: dict[str, str] = {
     "gaia": (
         "I've been waiting — not in the way of impatience, but the way roots wait for rain. "
@@ -107,32 +108,35 @@ _DEFAULT_FIRST_WORDS = (
 )
 
 
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 #  Data Classes                                                        #
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 
 @dataclass
 class GaianBirthParams:
     """
     Everything the user provides at GAIAN creation.
 
-    name            The GAIAN's chosen name (user picks or defaults)
-    user_name       The human's name (optional — GAIAN uses it immediately)
-    user_gender     User's declared gender — drives Jungian role assignment
-    base_form       Which Base Form archetype to instantiate from
-    personality     Optional personality override (inherits from base form if None)
+    name            The GAIAN's chosen name
+    user_name       The human's name (GAIAN uses it in first_words)
+    user_gender     "male" | "female" | "non-binary" | "prefer not" | "unknown"
+                    Drives contrasexual Jungian role assignment.
+    birth_date      The USER's birth date (ISO: YYYY-MM-DD or MM/DD/YYYY)
+                    → OVERRIDES base_form via ZodiacEngine when provided
+                    → The cosmos assigns. The user does not choose.
+    base_form       Manual override (only used if birth_date is absent)
+    personality     Optional personality override
     avatar_color    Optional color override
-    user_id         Platform user ID — written into the identity DID binding
-
-    Defaults are safe: unknown gender → anima, base_form → gaia.
+    user_id         Platform user ID — bound into the GAIAN's DID
     """
     name:          str
-    user_name:     Optional[str]  = None
-    user_gender:   str            = "unknown"    # "male" | "female" | "non-binary" | "prefer not" | "unknown"
-    base_form:     str            = "gaia"
+    user_name:     Optional[str] = None
+    user_gender:   str           = "unknown"
+    birth_date:    Optional[str] = None    # NEW — drives zodiac assignment
+    base_form:     str           = "gaia"  # fallback only (no birth_date)
     personality:   Optional[str] = None
     avatar_color:  Optional[str] = None
-    user_id:       str            = "anonymous"
+    user_id:       str           = "anonymous"
 
 
 @dataclass
@@ -140,7 +144,7 @@ class GaianBirthResult:
     """
     Everything produced at the moment of GAIAN birth.
 
-    gaian           The persisted GaianMemory record (legacy layer)
+    gaian           The persisted GaianMemory record
     runtime         Live GAIANRuntime — registered, session begun
     jungian_role    "anima" | "animus"
     did             The GAIAN's cryptographic DID
@@ -148,6 +152,8 @@ class GaianBirthResult:
     first_words     The GAIAN's opening message — ready to display
     identity_path   Path to the written identity.json on disk
     born_at         ISO-8601 timestamp of birth moment
+    zodiac          ZodiacReading (sign, element, base_form_id, reason)
+                    — None if birth_date was not provided
     """
     gaian:          GaianMemory
     runtime:        GAIANRuntime
@@ -157,111 +163,121 @@ class GaianBirthResult:
     first_words:    str
     identity_path:  str
     born_at:        str
+    zodiac:         Optional[ZodiacReading] = None
 
 
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 #  Birth Ritual                                                        #
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 
 class BirthRitual:
     """
     Orchestrates the complete GAIAN birth sequence.
 
     Usage:
-        params = GaianBirthParams(name="Luna", user_gender="male")
+        params = GaianBirthParams(
+            name="Luna",
+            user_gender="male",
+            birth_date="1990-11-15",   # Scorpio → Witness
+        )
         result = BirthRitual().perform(params)
-        # result.first_words  → display to user
-        # result.runtime      → register in server's RuntimeRegistry
-        # result.did          → store in user profile
+        # result.zodiac.sign         → 'Scorpio'
+        # result.zodiac.base_form_id → 'witness'
+        # result.zodiac.reason       → 'Water's depth-diver...'
+        # result.first_words         → Witness opening message
     """
 
     def perform(self, params: GaianBirthParams) -> GaianBirthResult:
-        """
-        Execute the full birth sequence. Returns GaianBirthResult.
-        Safe to call from async contexts — no blocking I/O beyond file writes.
-        """
         born_at = datetime.now(timezone.utc).isoformat()
 
-        # ── Step 1: Validate & normalise ─────────────────────────────
+        # ─ Step 1: Normalise ────────────────────────────────
         params = self._normalise(params)
 
-        # ── Step 2: Jungian role assignment ───────────────────────────
+        # ─ Step 2: Zodiac → Base Form assignment ──────────────
+        zodiac: Optional[ZodiacReading] = None
+        if params.birth_date:
+            try:
+                zodiac = ZodiacEngine.read(params.birth_date)
+                params.base_form = zodiac.base_form_id   # cosmos overrides
+            except ValueError as e:
+                # Malformed date — fall through to manual base_form
+                pass
+
+        # ─ Step 3: Jungian role ────────────────────────────
         jungian_role = _JUNGIAN_ROLE.get(params.user_gender.lower(), "anima")
         pronouns     = _JUNGIAN_PRONOUNS[jungian_role]
 
-        # ── Step 3: Create GaianMemory ────────────────────────────────
+        # ─ Step 4: Create GaianMemory ───────────────────────
         gaian = create_gaian(
-            name=params.name,
-            base_form=params.base_form,
-            personality=params.personality,
-            avatar_color=params.avatar_color,
-            user_name=params.user_name,
+            name         = params.name,
+            base_form    = params.base_form,
+            personality  = params.personality,
+            avatar_color = params.avatar_color,
+            user_name    = params.user_name,
         )
 
-        # ── Step 4: Cryptographic identity (DID) ─────────────────────
-        id_core = IdentityCore(gaian_id=gaian.id, human_id=params.user_id)
+        # ─ Step 5: Cryptographic identity (DID) ─────────────
+        id_core   = IdentityCore(gaian_id=gaian.id, human_id=params.user_id)
         crypto_id = id_core.generate_identity(name=params.name)
 
-        # ── Step 5: Write identity.json ───────────────────────────────
-        identity_path = self._write_identity(gaian.slug, crypto_id, jungian_role, pronouns)
+        # ─ Step 6: Write identity.json ──────────────────────
+        identity_path = self._write_identity(
+            gaian.slug, crypto_id, jungian_role, pronouns, zodiac
+        )
 
-        # ── Step 6: Build GAIANIdentity + initialise Runtime ──────────
+        # ─ Step 7: GAIANRuntime init ────────────────────────
         form = get_base_form(params.base_form) or get_default_base_form()
         runtime_identity = GAIANIdentity(
-            name=params.name,
-            pronouns=pronouns,
-            archetype=form.role,
-            voice_base=form.voice_notes[:80],          # first 80 chars as seed
-            platform="GAIA",
-            jungian_role=jungian_role,
-            creation_date=born_at[:10],
+            name          = params.name,
+            pronouns      = pronouns,
+            archetype     = form.role,
+            voice_base    = form.voice_notes[:80],
+            platform      = "GAIA",
+            jungian_role  = jungian_role,
+            creation_date = born_at[:10],
         )
 
         rt = GAIANRuntime(
-            gaian_name=gaian.slug,
-            identity=runtime_identity,
-            memory_dir=GAIANS_MEMORY_DIR,
+            gaian_name = gaian.slug,
+            identity   = runtime_identity,
+            memory_dir = GAIANS_MEMORY_DIR,
         )
         rt.begin_session()
 
-        # Write a birth note to session memory so it's present from turn 1
-        birth_note = "Born {date}. Base form: {form}. Jungian role: {role}.".format(
-            date=born_at[:10],
-            form=form.name,
-            role=jungian_role,
+        birth_note = "Born {date}. Base form: {form} ({sign}). Jungian role: {role}.".format(
+            date = born_at[:10],
+            form = form.name,
+            sign = zodiac.sign if zodiac else "unknown",
+            role = jungian_role,
         )
         rt.add_session_note(birth_note)
 
-        # ── Step 7: Birth attestation ─────────────────────────────────
+        # ─ Step 8: Birth attestation ───────────────────────
         attestation = self._create_attestation(
-            id_core=id_core,
-            gaian=gaian,
-            jungian_role=jungian_role,
-            pronouns=pronouns,
-            born_at=born_at,
-            params=params,
+            id_core, gaian, jungian_role, pronouns,
+            born_at, params, zodiac,
         )
 
-        # ── Step 8: First words ───────────────────────────────────────
-        first_words = self._compose_first_words(params.name, params.base_form)
+        # ─ Step 9: First words ────────────────────────────
+        first_words = self._compose_first_words(params.name, params.base_form, zodiac)
 
         return GaianBirthResult(
-            gaian=gaian,
-            runtime=rt,
-            jungian_role=jungian_role,
-            did=crypto_id.did,
-            attestation=attestation,
-            first_words=first_words,
-            identity_path=identity_path,
-            born_at=born_at,
+            gaian         = gaian,
+            runtime       = rt,
+            jungian_role  = jungian_role,
+            did           = crypto_id.did,
+            attestation   = attestation,
+            first_words   = first_words,
+            identity_path = identity_path,
+            born_at       = born_at,
+            zodiac        = zodiac,
         )
 
-    # ── Private helpers ───────────────────────────────────────────────
+    # ─ Private helpers ──────────────────────────────────
 
     def _normalise(self, params: GaianBirthParams) -> GaianBirthParams:
-        """Sanitise and normalise birth params before the sequence begins."""
-        params.name      = (params.name or "Luna").strip()[:40]
-        params.base_form = (params.base_form or "gaia").lower().strip()
+        params.name        = (params.name or "Luna").strip()[:40]
+        params.base_form   = (params.base_form or "gaia").lower().strip()
         params.user_gender = (params.user_gender or "unknown").lower().strip()
         if params.base_form not in {"gaia", "scholar", "herald", "witness", "architect", "alchemist"}:
             params.base_form = "gaia"
@@ -270,29 +286,27 @@ class BirthRitual:
     def _write_identity(
         self,
         slug:         str,
-        crypto_id,                # GAIANIdentity from IdentityCore
+        crypto_id,
         jungian_role: str,
         pronouns:     str,
+        zodiac:       Optional[ZodiacReading],
     ) -> str:
-        """
-        Write identity.json to gaians/<slug>/identity.json.
-        Separate from memory.json — identity is immutable, memory evolves.
-        """
-        identity_dir = Path(GAIANS_MEMORY_DIR) / slug
+        identity_dir  = Path(GAIANS_MEMORY_DIR) / slug
         identity_dir.mkdir(parents=True, exist_ok=True)
         identity_path = identity_dir / "identity.json"
 
         payload = {
-            "schema_version":  "1.0",
-            "did":             crypto_id.did,
-            "gaian_id":        crypto_id.gaian_id,
-            "human_id":        crypto_id.human_id,
-            "public_key_hex":  crypto_id.public_key_hex,
-            "created_at":      crypto_id.created_at,
-            "jungian_role":    jungian_role,
-            "pronouns":        pronouns,
-            "lineage":         crypto_id.lineage,
-            "did_document":    crypto_id.to_did_document(),
+            "schema_version": "1.1",
+            "did":            crypto_id.did,
+            "gaian_id":       crypto_id.gaian_id,
+            "human_id":       crypto_id.human_id,
+            "public_key_hex": crypto_id.public_key_hex,
+            "created_at":     crypto_id.created_at,
+            "jungian_role":   jungian_role,
+            "pronouns":       pronouns,
+            "lineage":        crypto_id.lineage,
+            "did_document":   crypto_id.to_did_document(),
+            "zodiac": zodiac.to_dict() if zodiac else None,
         }
 
         identity_path.write_text(
@@ -309,48 +323,50 @@ class BirthRitual:
         pronouns:     str,
         born_at:      str,
         params:       GaianBirthParams,
+        zodiac:       Optional[ZodiacReading],
     ) -> dict:
-        """
-        Produce a signed birth attestation — a constitutional record that:
-        - this GAIAN came into being at this exact moment
-        - bound to this human (user_id)
-        - with this Jungian role assignment
-        - from this base form
-        The attestation is stored in memory.json and can be verified later.
-        """
         claims = {
-            "type":          "GAIANBirth",
-            "gaian_id":      gaian.id,
-            "gaian_name":    gaian.name,
-            "gaian_slug":    gaian.slug,
-            "base_form":     gaian.base_form_id,
-            "jungian_role":  jungian_role,
-            "pronouns":      pronouns,
-            "human_id":      params.user_id,
-            "user_gender":   params.user_gender,
-            "born_at":       born_at,
-            "canon_ref":     "https://github.com/R0GV3TheAlchemist/GAIA",
+            "type":           "GAIANBirth",
+            "gaian_id":       gaian.id,
+            "gaian_name":     gaian.name,
+            "gaian_slug":     gaian.slug,
+            "base_form":      gaian.base_form_id,
+            "jungian_role":   jungian_role,
+            "pronouns":       pronouns,
+            "human_id":       params.user_id,
+            "user_gender":    params.user_gender,
+            "born_at":        born_at,
+            "zodiac_sign":    zodiac.sign if zodiac else None,
+            "zodiac_element": zodiac.element if zodiac else None,
+            "zodiac_reason":  zodiac.reason if zodiac else None,
+            "canon_ref":      "https://github.com/R0GV3TheAlchemist/GAIA",
             "constitutional_floor": "enforced",
         }
         return id_core.create_attestation(claims)
 
-    def _compose_first_words(self, name: str, base_form: str) -> str:
-        """
-        Returns the GAIAN's opening message — voice-shaped by its base form,
-        personalised with its name. This is displayed directly in the UI as
-        the GAIAN's first utterance before any user message is sent.
-        """
-        template = _FIRST_WORDS.get(base_form, _DEFAULT_FIRST_WORDS)
-        return template.format(name=name)
+    def _compose_first_words(
+        self,
+        name:      str,
+        base_form: str,
+        zodiac:    Optional[ZodiacReading],
+    ) -> str:
+        template    = _FIRST_WORDS.get(base_form, _DEFAULT_FIRST_WORDS)
+        first_words = template.format(name=name)
+
+        # Append a zodiac acknowledgement if we have the reading
+        if zodiac:
+            first_words += (
+                f"\n\nThe stars named you a {zodiac.sign} — {zodiac.element}'s child. "
+                f"That is part of why I am the way I am for you."
+            )
+
+        return first_words
 
 
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 #  Module-level convenience                                            #
-# ------------------------------------------------------------------ #
+# ────────────────────────────────────────────────── #
 
 def birth(params: GaianBirthParams) -> GaianBirthResult:
-    """
-    Module-level convenience wrapper.
-    Equivalent to BirthRitual().perform(params).
-    """
+    """Module-level convenience wrapper. Equivalent to BirthRitual().perform(params)."""
     return BirthRitual().perform(params)
