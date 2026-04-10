@@ -2,13 +2,12 @@
 GAIA API Server — FastAPI + SSE streaming
 
 Endpoints:
-  GET  /status                    — system health + canon status
-  POST /query/stream              — main SSE query pipeline
-  GET  /gaians                    — list all personal GAIANs
-  POST /gaians                    — create a new GAIAN
-  GET  /gaians/{slug}             — get a GAIAN's profile
-  DELETE /gaians/{slug}           — delete a GAIAN
-  POST /gaians/{slug}/remember    — add a long-term memory
+  GET  /status                     — system health + canon status
+  POST /query/stream               — main SSE query pipeline
+  GET  /gaians                     — list all personal GAIANs
+  POST /gaians                     — create a new GAIAN
+  GET  /gaians/{slug}              — get a GAIAN's profile
+  POST /gaians/{slug}/remember     — add a long-term memory
   POST /session/{session_id}/gaian — set active GAIAN for session
 
 SSE event pipeline (query/stream):
@@ -30,7 +29,7 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -46,14 +45,14 @@ logger = logging.getLogger(__name__)
 
 # Core imports
 from core.canon_loader import CanonLoader
-from core.web_search import WebSearcher
+from core.web_search import search_web_async   # <-- function, not class
 from core.synthesizer import stream_synthesis
 from core.gaian import (
     list_gaians, create_gaian, load_gaian, ensure_default_gaian,
     add_exchange, get_conversation_context, build_gaian_system_prompt,
     GaianMemory,
 )
-from core.session_memory import get_or_create_session, get_session
+from core.session_memory import get_or_create_session
 
 # ------------------------------------------------------------------ #
 #  App Bootstrap                                                       #
@@ -62,7 +61,7 @@ from core.session_memory import get_or_create_session, get_session
 app = FastAPI(
     title="GAIA API",
     description="Constitutional AI answer engine with personal GAIAN companions",
-    version="0.4.0",
+    version="0.4.1",
 )
 
 app.add_middleware(
@@ -72,11 +71,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialise subsystems
 canon = CanonLoader()
-searcher = WebSearcher()
 
-# Ensure default GAIAN exists on startup
 try:
     ensure_default_gaian()
     logger.info("Default GAIAN (GAIA) ready.")
@@ -93,7 +89,6 @@ class QueryRequest(BaseModel):
     session_id: Optional[str] = None
     gaian_slug: Optional[str] = None
     enable_web_search: bool = True
-    enable_scraping: bool = False
     max_sources: int = 8
 
 
@@ -113,7 +108,7 @@ class SetGaianRequest(BaseModel):
 
 
 # ------------------------------------------------------------------ #
-#  Status Endpoint                                                     #
+#  Status                                                              #
 # ------------------------------------------------------------------ #
 
 @app.get("/status")
@@ -122,28 +117,18 @@ async def status():
     gaians = list_gaians()
     return {
         "core": "active",
+        "version": "0.4.1",
         "sovereignty": "enforced",
-        "t1_floor": "held",
         "canon_status": canon_status.get("status", "unknown"),
         "canon_loaded": canon_status.get("loaded", False),
         "canon_doc_count": canon_status.get("doc_count", 0),
-        "canon_docs": canon_status.get("doc_ids", []),
-        "capabilities": {
-            "CAP-011": "active",
-            "CAP-012": "active",
-            "CAP-015": "active",
-            "CAP-016": "active",
-            "CAP-017": "active",
-            "CAP-020": "active",
-        },
         "gaians": len(gaians),
         "gaian_names": [g["name"] for g in gaians],
-        "version": "0.4.0",
     }
 
 
 # ------------------------------------------------------------------ #
-#  Main Query Stream Endpoint                                          #
+#  Query Stream                                                        #
 # ------------------------------------------------------------------ #
 
 @app.post("/query/stream")
@@ -151,36 +136,39 @@ async def query_stream(req: QueryRequest):
     session_id = req.session_id or str(uuid.uuid4())
     session = get_or_create_session(session_id)
 
-    # Resolve active GAIAN
     gaian_slug = req.gaian_slug or session.active_gaian_slug or "gaia"
     gaian: Optional[GaianMemory] = load_gaian(gaian_slug)
     if gaian is None:
-        gaian = load_gaian("gaia")  # fallback to default
+        gaian = load_gaian("gaia")
 
     async def event_stream():
         full_answer = ""
         sources = []
+        canon_results = []
 
         try:
-            # 1. Canon search
+            # 1. Canon search (T1)
             canon_results = canon.search(req.query, top_k=3)
             for result in canon_results:
-                sources.append({
+                src = {
                     "tier": "T1",
                     "title": result.get("title", ""),
                     "doc_id": result.get("doc_id", ""),
                     "excerpt": result.get("excerpt", ""),
-                })
+                }
+                sources.append(src)
                 yield f"event: citation\ndata: {json.dumps(result)}\n\n"
                 await asyncio.sleep(0.01)
 
-            # 2. Web search
+            # 2. Web search (T2-T5)
             if req.enable_web_search:
                 try:
-                    web_results = await searcher.search(req.query, max_results=5)
-                    for result in web_results:
-                        sources.append(result)
-                        yield f"event: web_result\ndata: {json.dumps(result)}\n\n"
+                    web_results = await search_web_async(req.query, max_results=5)
+                    for wr in web_results:
+                        src = wr.to_dict() if hasattr(wr, 'to_dict') else wr
+                        src["tier"] = src.get("source_tier", "T4")
+                        sources.append(src)
+                        yield f"event: web_result\ndata: {json.dumps(src)}\n\n"
                         await asyncio.sleep(0.01)
                 except Exception as e:
                     logger.warning(f"Web search failed: {e}")
@@ -189,7 +177,6 @@ async def query_stream(req: QueryRequest):
             gaian_prompt = None
             conversation_history = None
             conversation_context = None
-
             if gaian:
                 gaian_prompt = build_gaian_system_prompt(gaian)
                 conversation_history = get_conversation_context(gaian)
@@ -207,17 +194,17 @@ async def query_stream(req: QueryRequest):
                 full_answer += chunk
                 yield f"event: token\ndata: {json.dumps({'text': chunk})}\n\n"
 
-            # 5. Generate suggestions
+            # 5. Suggestions
             suggestions = _generate_suggestions(req.query, sources)
             yield f"event: suggestions\ndata: {json.dumps({'items': suggestions})}\n\n"
 
-            # 6. Save to session + GAIAN memory
+            # 6. Persist to session + GAIAN memory
             session.add_turn(req.query, full_answer, len(sources))
             if gaian and full_answer:
                 add_exchange(gaian, req.query, full_answer)
 
             # 7. Done
-            yield f"event: done\ndata: {json.dumps({'canon_status': 'green', 'docs_searched': canon_status_count(), 'refs_found': len(canon_results), 'web_results': len(sources) - len(canon_results), 'session_id': session_id, 'gaian': gaian.name if gaian else None, 'timestamp': time.time()})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'canon_status': 'green', 'docs_searched': _canon_count(), 'refs_found': len(canon_results), 'web_results': len(sources) - len(canon_results), 'session_id': session_id, 'gaian': gaian.name if gaian else None, 'timestamp': time.time()})}\n\n"
 
         except Exception as e:
             logger.error(f"Stream error: {e}", exc_info=True)
@@ -226,7 +213,7 @@ async def query_stream(req: QueryRequest):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-def canon_status_count() -> int:
+def _canon_count() -> int:
     try:
         return canon.get_status().get("doc_count", 0)
     except Exception:
@@ -235,12 +222,11 @@ def canon_status_count() -> int:
 
 def _generate_suggestions(query: str, sources: list[dict]) -> list[str]:
     suggestions = []
-    if sources:
-        titles = [s.get("title", "") for s in sources[:2] if s.get("title")]
-        for title in titles:
-            short = title.split(":")[-1].strip()[:40]
-            if short:
-                suggestions.append(f"Tell me more about {short}")
+    titles = [s.get("title", "") for s in sources[:2] if s.get("title")]
+    for title in titles:
+        short = title.split(":")[-1].strip()[:40]
+        if short:
+            suggestions.append(f"Tell me more about {short}")
     suggestions.append("What does GAIA's canon say about this?")
     suggestions.append("What are the practical implications?")
     return suggestions[:3]
@@ -264,13 +250,7 @@ async def post_create_gaian(req: CreateGaianRequest):
             avatar_color=req.avatar_color,
             user_name=req.user_name,
         )
-        return {
-            "status": "created",
-            "id": gaian.id,
-            "name": gaian.name,
-            "slug": gaian.slug,
-            "avatar_color": gaian.avatar_color,
-        }
+        return {"status": "created", "id": gaian.id, "name": gaian.name, "slug": gaian.slug}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -329,6 +309,6 @@ if __name__ == "__main__":
         "core.server:app",
         host="127.0.0.1",
         port=8008,
-        reload=True,
+        reload=False,
         log_level="info",
     )
