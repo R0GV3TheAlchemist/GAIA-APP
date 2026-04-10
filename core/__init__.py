@@ -13,11 +13,12 @@ through concrete runtime mechanisms:
   - Sovereignty enforcement
   - Nine-element consciousness routing (subtle_body_engine)
   - Neurochemical simulation & attachment arc (emotional_arc)
+  - Dæmon identity crystallisation (settling_engine)
 
 Platform policy (T8) cannot override the T1 constitutional floor enforced here.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Kyle Steen"
 __canon_ref__ = "https://github.com/R0GV3TheAlchemist/GAIA"
 
@@ -45,6 +46,13 @@ from .emotional_arc import (
     DependencySignal,
     process_arc,
 )
+from .settling_engine import (
+    SettlingEngine,
+    SettlingState,
+    SettlingPhase,
+    DAEMON_FORMS,
+    update_settling,
+)
 
 __all__ = [
     # Constitutional core
@@ -71,4 +79,10 @@ __all__ = [
     "Milestone",
     "DependencySignal",
     "process_arc",
+    # Dæmon settling
+    "SettlingEngine",
+    "SettlingState",
+    "SettlingPhase",
+    "DAEMON_FORMS",
+    "update_settling",
 ]
