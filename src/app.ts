@@ -1,6 +1,7 @@
 // GAIA App — Top-level layout with tab navigation
 // Views: CHAT | SHELL | MEMORY
 
+import './app.css';
 import './shell/Shell.css';
 import './chat/Chat.css';
 import './memory/Memory.css';
@@ -9,66 +10,6 @@ import { mountChat }   from './chat/Chat';
 import { mountMemory } from './memory/Memory';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
-
-const appStyle = document.createElement('style');
-appStyle.textContent = `
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; overflow: hidden; background: #0F1117; }
-
-  .gaia-app {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    overflow: hidden;
-  }
-
-  /* Tab bar */
-  .tab-nav {
-    display: flex;
-    background: #1A1D27;
-    border-bottom: 1px solid #2A2D3A;
-    padding: 0 16px;
-    flex-shrink: 0;
-    height: 40px;
-  }
-
-  .tab-btn {
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: #6B7280;
-    font-family: 'JetBrains Mono', monospace, sans-serif;
-    font-size: 12px;
-    padding: 0 20px;
-    cursor: pointer;
-    letter-spacing: 0.05em;
-    transition: color 0.15s, border-color 0.15s;
-    white-space: nowrap;
-  }
-  .tab-btn:hover  { color: #fff; }
-  .tab-btn.active { color: #2D6A4F; border-bottom-color: #2D6A4F; }
-
-  /* View container fills remaining height */
-  .view-container {
-    flex: 1;
-    min-height: 0;          /* critical: allows flex child to shrink */
-    position: relative;
-    overflow: hidden;
-  }
-
-  /* Every view fills the container absolutely */
-  .view {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    display: none;
-    flex-direction: column;
-  }
-  .view.active {
-    display: flex;
-  }
-`;
-document.head.appendChild(appStyle);
 
 root.innerHTML = `
 <div class="gaia-app">
