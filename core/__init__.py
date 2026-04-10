@@ -11,11 +11,12 @@ through concrete runtime mechanisms:
   - Cryptographic consent lifecycle
   - Governed memory surface
   - Sovereignty enforcement
+  - Nine-element consciousness routing (subtle_body_engine)
 
 Platform policy (T8) cannot override the T1 constitutional floor enforced here.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Kyle Steen"
 __canon_ref__ = "https://github.com/R0GV3TheAlchemist/GAIA"
 
@@ -23,11 +24,31 @@ from .canon_loader import CanonLoader
 from .action_gate import ActionGate, RiskTier
 from .consent_ledger import ConsentLedger
 from .memory_store import MemoryStore
+from .subtle_body_engine import (
+    ConsciousnessRouter,
+    NineLayerStack,
+    LayerState,
+    Element,
+    SubtleBody,
+    JungianLayer,
+    ResponsePriority,
+    route,
+)
 
 __all__ = [
+    # Constitutional core
     "CanonLoader",
     "ActionGate",
     "RiskTier",
     "ConsentLedger",
     "MemoryStore",
+    # Consciousness routing
+    "ConsciousnessRouter",
+    "NineLayerStack",
+    "LayerState",
+    "Element",
+    "SubtleBody",
+    "JungianLayer",
+    "ResponsePriority",
+    "route",
 ]
