@@ -12,11 +12,9 @@ import { mountChat }       from './chat/Chat';
 import { mountMemory }     from './memory/Memory';
 import { mountGaianChat }  from './gaian/GaianChatView';
 
-export { API_BASE } from './app';
-
 const BASE_URL = (import.meta as Record<string,unknown>).env
-  ? ((import.meta as Record<string,unknown>).env as Record<string,string>).VITE_API_BASE ?? 'http://localhost:8000'
-  : 'http://localhost:8000';
+  ? ((import.meta as Record<string,unknown>).env as Record<string,string>).VITE_API_BASE ?? 'http://localhost:8008'
+  : 'http://localhost:8008';
 
 export const API_BASE = BASE_URL;
 
