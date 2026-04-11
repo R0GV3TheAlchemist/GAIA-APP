@@ -1,0 +1,74 @@
+# .github/workflows/test.yml
+# GAIA-APP — Python Test Suite (Sprint G-1/G-2)
+#
+# Runs on every push and pull request to main.
+# Tests MUST pass. No continue-on-error.
+# Covers: SynergyEngine unit tests + GAIANRuntime smoke tests.
+
+name: Python Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/test.yml'
+
+jobs:
+  test:
+    name: Test Suite — Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run test suite
+        run: |
+          pytest tests/ \
+            -v \
+            --tb=short \
+            --cov=core \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            -p no:warnings
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.12'
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "### GAIA-APP Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "Python: ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+          pytest tests/ --tb=no -q 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY || true
