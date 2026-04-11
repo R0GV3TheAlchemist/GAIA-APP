@@ -1,55 +1,40 @@
 """
-GAIA API Server — FastAPI + SSE streaming v1.2.0
+GAIA API Server — FastAPI + SSE streaming v1.3.0
 
-Sprint G-3: JWT auth layer integrated.
+Sprint G-4: Structured logging integrated.
 
-Changes from v1.1.0:
-  - core/auth.py JWT layer integrated
-  - POST /auth/token  — issue access token
-  - GET  /auth/me     — verify token + return payload
-  - Write endpoints now require Bearer JWT:
-      POST /gaians/birth
-      POST /gaians/{slug}/remember
-      POST /gaians/{slug}/memory
-      POST /gaians/{slug}/chat
-      POST /query/stream
-      POST /session/{session_id}/gaian
-  - Read endpoints use optional_auth (work for authed + anonymous)
-  - GET /admin/me requires admin role
-  - CORS allow_origins locked to GAIA_CORS_ORIGINS env var
-    (defaults to localhost only — set in production)
-  - GAIA_SECRET_KEY must be set in environment for production
+Changes from v1.2.0:
+  - core/logger.py structured logging layer integrated
+  - basicConfig replaced with get_logger(__name__)
+  - LoggingMiddleware added — every request stamped with correlation ID
+  - X-Correlation-ID header returned on every response
+  - Key events emit typed log_event() calls:
+      GAIAEvent.GAIAN_BORN, TURN_COMPLETE, TURN_ERROR,
+      TOKEN_ISSUED, CANON_LOADED, ENGINE_CHAIN,
+      SOUL_MIRROR_NUDGE, SCHUMANN_ALIGNED
+  - GAIA_LOG_FORMAT=text for dev, json (default) for production
+  - GAIA_LOG_LEVEL controls verbosity (default INFO)
 
-Endpoints:
-  POST /auth/token                        — issue JWT
-  GET  /auth/me                           — verify + inspect token
-  GET  /status                            — system health (public)
-  GET  /canon/status                      — canon loader status (public)
-  GET  /memory/list                       — session memory list (public)
-  GET  /gaians/base-forms                 — list Base Form archetypes (public)
-  GET  /gaians                            — list user's GAIANs (public)
-  POST /gaians                            — legacy create [auth required]
-  POST /gaians/birth                      — full birth ritual [auth required]
-  GET  /gaians/{slug}                     — GAIAN profile (public)
-  GET  /gaians/{slug}/identity            — DID + Jungian + Zodiac (public)
-  POST /gaians/{slug}/remember            — legacy long-term memory [auth required]
-  POST /gaians/{slug}/memory              — visible memory [auth required]
-  GET  /gaians/{slug}/runtime-status      — live engine snapshot (public)
-  POST /gaians/{slug}/chat                — runtime-native chat [auth required]
-  GET  /gaians/{slug}/resonance           — live resonance field (public)
-  GET  /gaians/{slug}/soul-mirror         — live soul mirror state (public)
-  POST /session/{session_id}/gaian        — set active GAIAN [auth required]
-  POST /query/stream                      — SSE query pipeline [auth required]
-  GET  /zodiac/preview                    — zodiac preview (public)
-  GET  /zodiac/all                        — zodiac table (public)
-  GET  /admin/me                          — admin identity [admin role required]
+Endpoints: (unchanged from v1.2.0)
+  POST /auth/token  GET /auth/me
+  GET  /status  GET /canon/status  GET /memory/list
+  GET  /gaians/base-forms  GET /gaians
+  POST /gaians  POST /gaians/birth
+  GET  /gaians/{slug}  GET /gaians/{slug}/identity
+  POST /gaians/{slug}/remember  POST /gaians/{slug}/memory
+  GET  /gaians/{slug}/runtime-status
+  POST /gaians/{slug}/chat
+  GET  /gaians/{slug}/resonance  GET /gaians/{slug}/soul-mirror
+  POST /session/{session_id}/gaian
+  POST /query/stream
+  GET  /zodiac/preview  GET /zodiac/all
+  GET  /admin/me
 
 Canon Ref: C01, C15, C17, C21, C30
 """
 
 import asyncio
 import json
-import logging
 import os
 import time
 import uuid
@@ -67,8 +52,15 @@ try:
 except ImportError:
     pass
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ── Structured logging must be configured before any other import logs ──
+from core.logger import (
+    GAIAEvent,
+    LoggingMiddleware,
+    get_logger,
+    log_event,
+)
+
+logger = get_logger(__name__)
 
 from core.auth import (
     TokenPayload,
@@ -93,7 +85,7 @@ from core.codex_stage_engine import NoosphericHealthSignals
 from core.zodiac_engine import ZodiacEngine, ZODIAC_FORM_MAP, ALL_SIGNS
 
 
-SERVER_VERSION = "1.2.0"
+SERVER_VERSION = "1.3.0"
 
 # ──────────────────────────────────────────────────────────────────── #
 #  Admin Avatar — The Builder                                                #
@@ -134,12 +126,14 @@ _CORS_ORIGINS = [
 
 app = FastAPI(title="GAIA API", version=SERVER_VERSION)
 
+# Middleware order: logging first (outermost), then CORS
+app.add_middleware(LoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Correlation-ID"],
 )
 
 # Mount auth router
@@ -150,9 +144,13 @@ canon.load()
 
 try:
     ensure_default_gaian()
-    logger.info("Default GAIAN (GAIA) ready.")
+    log_event(GAIAEvent.GAIAN_LOADED, message="Default GAIAN (GAIA) ready.", gaian="gaia")
 except Exception as e:
     logger.warning(f"Could not initialise default GAIAN: {e}")
+
+log_event(GAIAEvent.CANON_LOADED,
+          message=f"Canon loaded: {len(canon.list_documents())} docs status={canon.status}",
+          doc_count=len(canon.list_documents()), canon_status=canon.status)
 
 
 # ──────────────────────────────────────────────────────────────────── #
@@ -160,7 +158,6 @@ except Exception as e:
 # ──────────────────────────────────────────────────────────────────── #
 
 _RUNTIME_REGISTRY: dict[str, GAIANRuntime] = {}
-
 GAIANS_MEMORY_DIR = os.environ.get("GAIANS_MEMORY_DIR", "./gaians")
 
 
@@ -201,7 +198,9 @@ def _get_runtime(slug: str, gaian: Optional[GaianMemory] = None) -> GAIANRuntime
         )
         rt.begin_session()
         _RUNTIME_REGISTRY[slug] = rt
-        logger.info(f"GAIANRuntime initialised for slug='{slug}' jungian={jungian_role}")
+        log_event(GAIAEvent.GAIAN_RUNTIME_INIT,
+                  message=f"GAIANRuntime initialised for slug='{slug}'",
+                  gaian=slug, jungian_role=jungian_role)
     return _RUNTIME_REGISTRY[slug]
 
 
@@ -277,6 +276,7 @@ async def status():
         "engines":           11,
         "sovereignty":       "enforced",
         "auth":              "jwt-hs256",
+        "logging":           "structured",
         "admin":             _ADMIN_IDENTITY["handle"],
         "canon_status":      canon.status,
         "canon_loaded":      canon.is_loaded,
@@ -321,6 +321,8 @@ async def memory_list(session_id: Optional[str] = None):
 
 @app.get("/admin/me")
 async def admin_me(user: TokenPayload = Depends(require_admin)):
+    log_event(GAIAEvent.ADMIN_ACCESS, message="Admin identity accessed",
+              user_id=user.user_id)
     form = get_base_form("alchemist")
     return {
         **_ADMIN_IDENTITY,
@@ -344,17 +346,17 @@ async def zodiac_preview(
         reading = ZodiacEngine.read(birth_date)
         form    = get_base_form(reading.base_form_id)
         return {
-            "birth_date":    reading.birth_date,
-            "sign":          reading.sign,
-            "element":       reading.element,
-            "base_form_id":  reading.base_form_id,
+            "birth_date":     reading.birth_date,
+            "sign":           reading.sign,
+            "element":        reading.element,
+            "base_form_id":   reading.base_form_id,
             "base_form_name": form.name if form else reading.base_form_id,
             "base_form_role": form.role if form else "",
-            "avatar_color":  form.avatar_color if form else "",
-            "avatar_style":  form.avatar_style if form else "",
-            "visual_notes":  form.visual_notes if form else "",
-            "reason":        reading.reason,
-            "assigned_by":   "cosmos",
+            "avatar_color":   form.avatar_color if form else "",
+            "avatar_style":   form.avatar_style if form else "",
+            "visual_notes":   form.visual_notes if form else "",
+            "reason":         reading.reason,
+            "assigned_by":    "cosmos",
         }
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -399,7 +401,6 @@ async def post_create_gaian(
     req: CreateGaianRequest,
     user: TokenPayload = Depends(require_auth),
 ):
-    """Legacy create — auth required."""
     try:
         gaian = create_gaian(
             name         = req.name,
@@ -408,6 +409,8 @@ async def post_create_gaian(
             avatar_color = req.avatar_color,
             user_name    = req.user_name,
         )
+        log_event(GAIAEvent.GAIAN_BORN, message=f"Legacy GAIAN created: {gaian.slug}",
+                  gaian=gaian.slug, user_id=user.user_id)
         return {
             "status":       "created",
             "id":           gaian.id,
@@ -427,7 +430,6 @@ async def post_birth_gaian(
     req: BirthRequest,
     user: TokenPayload = Depends(require_auth),
 ):
-    """Full GAIAN birth ritual — auth required."""
     existing = load_gaian(req.name.lower().replace(" ", "_")[:24])
     if existing:
         raise HTTPException(
@@ -446,14 +448,21 @@ async def post_birth_gaian(
             base_form    = req.base_form,
             personality  = req.personality,
             avatar_color = req.avatar_color,
-            user_id      = user.user_id,   # use authenticated user_id, not request body
+            user_id      = user.user_id,
         )
         result = BirthRitual().perform(params)
         _RUNTIME_REGISTRY[result.gaian.slug] = result.runtime
-        logger.info(
-            f"GAIAN born: slug='{result.gaian.slug}' form={result.gaian.base_form_id} "
-            f"jungian={result.jungian_role} zodiac={result.zodiac.sign if result.zodiac else 'none'} "
-            f"DID={result.did[:20]}... by user={user.user_id}"
+
+        zodiac_sign = result.zodiac.sign if result.zodiac else None
+        log_event(
+            GAIAEvent.GAIAN_BORN,
+            message=f"GAIAN born: {result.gaian.slug}",
+            gaian=result.gaian.slug,
+            user_id=user.user_id,
+            base_form=result.gaian.base_form_id,
+            jungian_role=result.jungian_role,
+            zodiac=zodiac_sign,
+            did_prefix=result.did[:20],
         )
         return {
             "status":       "born",
@@ -481,7 +490,8 @@ async def post_birth_gaian(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Birth ritual failed: {e}", exc_info=True)
+        logger.error(f"Birth ritual failed: {e}", exc_info=True,
+                     extra={"event": GAIAEvent.TURN_ERROR.value, "gaian": req.name})
         raise HTTPException(status_code=500, detail=f"Birth ritual failed: {str(e)}")
 
 
@@ -541,6 +551,9 @@ async def post_remember(
     if len(gaian.long_term_memories) > 50:
         gaian.long_term_memories = gaian.long_term_memories[-50:]
     _save_gaian(gaian)
+    log_event(GAIAEvent.MEMORY_SAVED, message=f"Long-term memory saved for {slug}",
+              gaian=slug, user_id=user.user_id,
+              total_memories=len(gaian.long_term_memories))
     return {"status": "remembered", "total_memories": len(gaian.long_term_memories)}
 
 
@@ -555,6 +568,8 @@ async def post_visible_memory(
         raise HTTPException(status_code=404, detail=f"GAIAN '{slug}' not found")
     rt = _get_runtime(slug, gaian)
     rt.add_visible_memory(req.memory)
+    log_event(GAIAEvent.MEMORY_SAVED, message=f"Visible memory saved for {slug}",
+              gaian=slug, user_id=user.user_id)
     return {
         "status":                "remembered",
         "slug":                  slug,
@@ -590,6 +605,7 @@ async def gaian_chat(
 
     async def event_stream():
         full_answer = ""
+        t0 = time.perf_counter()
         try:
             rt            = _get_runtime(slug, gaian)
             canon_results = canon.search(req.message, max_results=2)
@@ -609,6 +625,29 @@ async def gaian_chat(
                 noosphere = NoosphericHealthSignals(schumann_boost=-0.05)
 
             result = rt.process(req.message, noosphere=noosphere)
+
+            # Log engine chain results
+            log_event(
+                GAIAEvent.ENGINE_CHAIN,
+                message=f"Engine chain: {slug} exchange={rt.attachment.total_exchanges}",
+                gaian=slug,
+                user_id=user.user_id,
+                bond_depth=round(rt.attachment.bond_depth, 2),
+                individuation=result.soul_mirror.individuation_phase.value if hasattr(result.soul_mirror, 'individuation_phase') else None,
+                resonance_hz=result.resonance_field.solfeggio.hz.value if hasattr(result.resonance_field, 'solfeggio') else None,
+                synergy_factor=round(result.synergy.synergy_factor, 3) if hasattr(result.synergy, 'synergy_factor') else None,
+            )
+
+            if result.soul_mirror.individuation_nudge:
+                log_event(GAIAEvent.SOUL_MIRROR_NUDGE,
+                          message=f"Soul mirror nudge: {slug}",
+                          gaian=slug, user_id=user.user_id,
+                          signal=result.soul_mirror.shadow_signal.value if hasattr(result.soul_mirror, 'shadow_signal') else None)
+
+            if result.resonance_field.schumann_aligned:
+                log_event(GAIAEvent.SCHUMANN_ALIGNED,
+                          message=f"Schumann aligned: {slug}",
+                          gaian=slug, schumann_hz=req.schumann_hz)
 
             yield f"event: engine_state\ndata: {json.dumps(result.state_snapshot)}\n\n"
             await asyncio.sleep(0.01)
@@ -656,12 +695,24 @@ async def gaian_chat(
             if full_answer:
                 add_exchange(gaian, req.message, full_answer)
 
+            duration_ms = round((time.perf_counter() - t0) * 1000, 1)
+            log_event(
+                GAIAEvent.TURN_COMPLETE,
+                message=f"Turn complete: {slug}",
+                gaian=slug,
+                user_id=user.user_id,
+                duration_ms=duration_ms,
+                exchange=rt.attachment.total_exchanges,
+                bond_depth=round(rt.attachment.bond_depth, 2),
+            )
+
             yield (
                 f"event: done\ndata: {json.dumps({'session_id': session_id, 'gaian': gaian.name, 'gaian_slug': slug, 'user_id': user.user_id, 'exchange': rt.attachment.total_exchanges, 'bond_depth': round(rt.attachment.bond_depth, 2), 'individuation_phase': rt.soul_mirror_state.individuation_phase.value, 'resonance_hz': result.resonance_field.solfeggio.hz.value, 'schumann_aligned': result.resonance_field.schumann_aligned, 'noosphere_health': round(rt.codex_stage_state.noosphere_health, 4), 'timestamp': time.time()})}\n\n"
             )
 
         except Exception as e:
-            logger.error(f"Chat stream error [{slug}]: {e}", exc_info=True)
+            logger.error(f"Chat stream error [{slug}]: {e}", exc_info=True,
+                         extra={"event": GAIAEvent.TURN_ERROR.value, "gaian": slug})
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -745,8 +796,14 @@ async def query_stream(
         full_answer = ""
         sources     = []
         canon_results = []
+        t0 = time.perf_counter()
         try:
             canon_results = canon.search(req.query, max_results=3)
+            log_event(GAIAEvent.CANON_SEARCH,
+                      message=f"Canon search: {len(canon_results)} results",
+                      gaian=gaian_slug, user_id=user.user_id,
+                      results=len(canon_results))
+
             for result in canon_results:
                 src = {"tier": "T1", "title": result.get("title", ""), "doc_id": result.get("doc_id", ""), "excerpt": result.get("excerpt", "")}
                 sources.append(src)
@@ -793,10 +850,21 @@ async def query_stream(
             if gaian and full_answer:
                 add_exchange(gaian, req.query, full_answer)
 
+            duration_ms = round((time.perf_counter() - t0) * 1000, 1)
+            log_event(
+                GAIAEvent.TURN_COMPLETE,
+                message=f"Query stream complete",
+                gaian=gaian_slug, user_id=user.user_id,
+                duration_ms=duration_ms,
+                canon_refs=len(canon_results),
+                web_results=len(sources) - len(canon_results),
+            )
+
             yield f"event: done\ndata: {json.dumps({'canon_status': canon.status, 'docs_searched': len(canon.list_documents()), 'refs_found': len(canon_results), 'web_results': len(sources) - len(canon_results), 'session_id': session_id, 'user_id': user.user_id, 'gaian': gaian.name if gaian else None, 'gaian_slug': gaian_slug, 'runtime_active': runtime_system_prompt is not None, 'timestamp': time.time()})}\n\n"
 
         except Exception as e:
-            logger.error(f"Stream error: {e}", exc_info=True)
+            logger.error(f"Stream error: {e}", exc_info=True,
+                         extra={"event": GAIAEvent.TURN_ERROR.value})
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
