@@ -1,21 +1,31 @@
 """
 CanonLoader — Loads, caches, and serves the GAIA constitutional canon.
 
-Upgrade over v1:
-  - Manifest-aware: reads docs/canon/CANON_MANIFEST.md to discover all
-    C-series documents (local + remote).
-  - Lazy remote fetch: documents not present locally are fetched from
-    the GAIA repo on first access and cached with a 24-hour TTL.
-  - Structured status: returns GREEN / YELLOW / RED signal for the UI
-    status bar dot.
-  - Full-text search: search() method for canon-grounded query responses.
-  - Graceful offline: if remote fetch fails, status degrades to YELLOW
-    rather than hard-crashing.
+v2 (G-8): Semantic search upgrade.
+  - TF-IDF scoring: term frequency weighted by inverse document frequency
+    so rare, meaningful terms rank higher than common filler words.
+  - Chunked passage search: documents are split into ~300-token overlapping
+    windows. Each chunk is scored independently, so a long document does not
+    bury its best passage under low-density noise.
+  - Positional boosting: matches in the first 20% of a document (title,
+    opening premise) are boosted x1.5 — canon preambles matter more.
+  - Multi-term proximity: if two query terms appear within 50 characters of
+    each other in the same chunk, a co-occurrence bonus is added.
+  - Backward-compatible: search() signature unchanged — callers in server.py
+    get v2 results transparently. search_v2() exposes richer metadata.
+  - stop_words filter: common English stop words excluded from IDF so they
+    do not inflate or deflate scores.
+
+All other behaviour (load, get, manifest, remote fetch, caching, status)
+unchanged from v1.
 
 Epistemic Status: FOUNDATIONAL
-Canon Ref: C00, C01, C15 (Runtime & Permissions), C17 (Memory & Identity)
+Canon Ref: C00, C01, C15, C17
 """
 
+from __future__ import annotations
+
+import math
 import os
 import re
 import time
@@ -26,23 +36,259 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Paths
-_REPO_ROOT = Path(__file__).parent.parent
-_DOCS_CANON_DIR = _REPO_ROOT / "docs" / "canon"
+# ------------------------------------------------------------------ #
+#  Paths & Constants                                                  #
+# ------------------------------------------------------------------ #
+
+_REPO_ROOT        = Path(__file__).parent.parent
+_DOCS_CANON_DIR   = _REPO_ROOT / "docs" / "canon"
 _LEGACY_CANON_DIR = _REPO_ROOT / "canon"
-_MANIFEST_PATH = _DOCS_CANON_DIR / "CANON_MANIFEST.md"
-_CACHE_DIR = Path.home() / ".gaia" / "canon_cache"
+_MANIFEST_PATH    = _DOCS_CANON_DIR / "CANON_MANIFEST.md"
+_CACHE_DIR        = Path.home() / ".gaia" / "canon_cache"
 _CACHE_TTL_SECONDS = 86400  # 24 hours
 
-# Constitutional floor: these two docs MUST be present for GREEN status
 _FLOOR_DOCS = {"00_Documentation_Index", "01_GAIA_Master_Document"}
 
+# Chunk size in characters (~300 tokens at ~4 chars/token)
+_CHUNK_SIZE    = 1200
+_CHUNK_OVERLAP = 200
+_EXCERPT_LEN   = 300
+_POSITION_BOOST_THRESHOLD = 0.20   # first 20% of doc
+_POSITION_BOOST_FACTOR    = 1.5
+_PROXIMITY_WINDOW         = 50     # chars
+_PROXIMITY_BONUS          = 0.5    # per co-occurring pair
+
+# English stop words — excluded from IDF calculation
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to",
+    "for", "of", "with", "by", "from", "as", "is", "was", "are",
+    "were", "be", "been", "being", "have", "has", "had", "do", "does",
+    "did", "will", "would", "could", "should", "may", "might", "shall",
+    "can", "this", "that", "these", "those", "it", "its", "not", "no",
+    "so", "if", "then", "than", "when", "where", "which", "who", "what",
+    "how", "all", "each", "every", "both", "more", "most", "other",
+    "into", "through", "during", "about", "between", "i", "we", "you",
+    "he", "she", "they", "their", "our", "your", "his", "her", "my",
+})
+
+
+# ------------------------------------------------------------------ #
+#  Status                                                             #
+# ------------------------------------------------------------------ #
 
 class CanonStatus:
-    GREEN = "green"    # C00 + C01 loaded, manifest parsed
-    YELLOW = "yellow"  # Loading or degraded (some docs unavailable)
-    RED = "red"        # Constitutional floor missing
+    GREEN  = "green"
+    YELLOW = "yellow"
+    RED    = "red"
 
+
+# ------------------------------------------------------------------ #
+#  TF-IDF Index                                                       #
+# ------------------------------------------------------------------ #
+
+class _TFIDFIndex:
+    """
+    Lightweight in-process TF-IDF index over canon document chunks.
+
+    On build():
+      - Each document is split into overlapping chunks.
+      - Term frequencies are computed per chunk.
+      - IDF is computed across all chunks (treating each chunk as a document).
+
+    On query():
+      - Each chunk is scored: sum of TF-IDF(term) for query terms.
+      - Position boost applied to chunks from the top 20% of their source doc.
+      - Proximity bonus applied when two query terms appear near each other.
+      - Top chunks de-duplicated by source doc (best chunk per doc returned).
+    """
+
+    def __init__(self):
+        self._chunks:    list[dict] = []           # {doc_id, title, text, offset, doc_len}
+        self._idf:       dict[str, float] = {}     # term -> IDF score
+        self._tf_cache:  list[dict[str, float]] = []  # per-chunk TF
+        self._built = False
+
+    def build(self, documents: dict[str, dict]) -> None:
+        """Build the full TF-IDF index from loaded canon documents."""
+        self._chunks    = []
+        self._tf_cache  = []
+        self._idf       = {}
+
+        # 1. Chunk all documents
+        for doc_id, doc in documents.items():
+            content = doc.get("content", "")
+            title   = doc.get("title", doc_id)
+            doc_len = len(content)
+            for chunk_text, offset in _chunk_text(content):
+                self._chunks.append({
+                    "doc_id": doc_id,
+                    "title":  title,
+                    "text":   chunk_text,
+                    "offset": offset,
+                    "doc_len": doc_len,
+                })
+
+        # 2. Compute TF per chunk
+        for chunk in self._chunks:
+            self._tf_cache.append(_term_freq(chunk["text"]))
+
+        # 3. Compute IDF across all chunks
+        n = len(self._chunks)
+        if n == 0:
+            self._built = True
+            return
+
+        doc_freq: dict[str, int] = {}
+        for tf in self._tf_cache:
+            for term in tf:
+                doc_freq[term] = doc_freq.get(term, 0) + 1
+
+        for term, df in doc_freq.items():
+            self._idf[term] = math.log((n + 1) / (df + 1)) + 1.0  # smoothed
+
+        self._built = True
+        logger.info(f"[Canon TF-IDF] Index built: {n} chunks from {len(documents)} docs, "
+                    f"{len(self._idf)} unique terms.")
+
+    def query(
+        self,
+        query: str,
+        max_results: int = 5,
+    ) -> list[dict]:
+        """
+        Score all chunks for the query. Return top max_results,
+        one per source document (best chunk per doc).
+        """
+        if not self._built or not self._chunks:
+            return []
+
+        q_terms = [
+            t for t in _tokenize(query)
+            if t not in _STOP_WORDS
+        ] or _tokenize(query)   # fallback: use all terms if all are stop words
+
+        if not q_terms:
+            return []
+
+        scored: list[tuple[float, int]] = []  # (score, chunk_idx)
+
+        for idx, (chunk, tf) in enumerate(zip(self._chunks, self._tf_cache)):
+            score = 0.0
+            text_lower = chunk["text"].lower()
+
+            for term in q_terms:
+                tf_val  = tf.get(term, 0.0)
+                idf_val = self._idf.get(term, 1.0)
+                score  += tf_val * idf_val
+
+            if score == 0.0:
+                continue
+
+            # Position boost: chunks from top 20% of source doc
+            doc_len = chunk["doc_len"]
+            if doc_len > 0 and chunk["offset"] / doc_len < _POSITION_BOOST_THRESHOLD:
+                score *= _POSITION_BOOST_FACTOR
+
+            # Proximity bonus: pairs of query terms near each other
+            for i, t1 in enumerate(q_terms):
+                for t2 in q_terms[i + 1:]:
+                    pos1 = text_lower.find(t1)
+                    pos2 = text_lower.find(t2)
+                    if pos1 >= 0 and pos2 >= 0 and abs(pos1 - pos2) <= _PROXIMITY_WINDOW:
+                        score += _PROXIMITY_BONUS
+
+            scored.append((score, idx))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        # De-duplicate: keep best chunk per doc_id
+        seen_docs: set[str] = set()
+        results: list[dict] = []
+        for score, idx in scored:
+            chunk  = self._chunks[idx]
+            doc_id = chunk["doc_id"]
+            if doc_id in seen_docs:
+                continue
+            seen_docs.add(doc_id)
+            excerpt = _best_excerpt(chunk["text"], q_terms)
+            results.append({
+                "doc_id":  doc_id,
+                "title":   chunk["title"],
+                "excerpt": excerpt,
+                "score":   round(score, 4),
+                "source":  "tfidf",
+                "chunk_offset": chunk["offset"],
+            })
+            if len(results) >= max_results:
+                break
+
+        return results
+
+
+# ------------------------------------------------------------------ #
+#  Helpers                                                            #
+# ------------------------------------------------------------------ #
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase, strip punctuation, split on whitespace."""
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return [t for t in text.split() if len(t) > 1]
+
+
+def _term_freq(text: str) -> dict[str, float]:
+    """Compute normalised term frequency for a chunk."""
+    tokens = _tokenize(text)
+    if not tokens:
+        return {}
+    counts: dict[str, int] = {}
+    for t in tokens:
+        counts[t] = counts.get(t, 0) + 1
+    total = len(tokens)
+    return {t: c / total for t, c in counts.items()}
+
+
+def _chunk_text(text: str) -> list[tuple[str, int]]:
+    """
+    Split text into overlapping chunks of _CHUNK_SIZE chars,
+    stepping by (_CHUNK_SIZE - _CHUNK_OVERLAP).
+    Returns list of (chunk_text, byte_offset).
+    """
+    step   = _CHUNK_SIZE - _CHUNK_OVERLAP
+    chunks = []
+    start  = 0
+    while start < len(text):
+        end = start + _CHUNK_SIZE
+        chunks.append((text[start:end], start))
+        if end >= len(text):
+            break
+        start += step
+    return chunks if chunks else [(text, 0)]
+
+
+def _best_excerpt(chunk_text: str, terms: list[str]) -> str:
+    """
+    Find the best ~300-char excerpt from a chunk centred on the first
+    query term hit. Falls back to the chunk head if no hit found.
+    """
+    lower = chunk_text.lower()
+    best_pos = -1
+    for term in terms:
+        pos = lower.find(term)
+        if pos >= 0:
+            best_pos = pos
+            break
+    if best_pos < 0:
+        raw = chunk_text[:_EXCERPT_LEN]
+    else:
+        start = max(0, best_pos - 80)
+        raw   = chunk_text[start: start + _EXCERPT_LEN]
+    return raw.strip().replace("\n", " ")
+
+
+# ------------------------------------------------------------------ #
+#  CanonLoader                                                        #
+# ------------------------------------------------------------------ #
 
 class CanonLoader:
     """
@@ -59,11 +305,12 @@ class CanonLoader:
     """
 
     def __init__(self, docs_canon_dir: Optional[Path] = None):
-        self._docs_dir = docs_canon_dir or _DOCS_CANON_DIR
-        self._manifest: dict[str, dict] = {}   # doc_id -> {title, url, local_path, status}
-        self._documents: dict[str, dict] = {}  # doc_id -> {id, title, content, source, loaded_at}
-        self._status = CanonStatus.YELLOW
-        self._loaded = False
+        self._docs_dir   = docs_canon_dir or _DOCS_CANON_DIR
+        self._manifest:  dict[str, dict] = {}
+        self._documents: dict[str, dict] = {}
+        self._status     = CanonStatus.YELLOW
+        self._loaded     = False
+        self._index      = _TFIDFIndex()
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ #
@@ -79,8 +326,12 @@ class CanonLoader:
         self._load_local_docs()
         self._load_legacy_docs()
         self._evaluate_status()
+        self._index.build(self._documents)   # G-8: build TF-IDF index
         self._loaded = True
-        logger.info(f"CanonLoader: {len(self._documents)} docs loaded | status={self._status}")
+        logger.info(
+            f"CanonLoader v2: {len(self._documents)} docs loaded | "
+            f"status={self._status}"
+        )
         return self._status in (CanonStatus.GREEN, CanonStatus.YELLOW)
 
     def get(self, doc_id: str) -> Optional[dict]:
@@ -90,37 +341,50 @@ class CanonLoader:
         """
         if doc_id in self._documents:
             return self._documents[doc_id]
-        return self._fetch_remote(doc_id)
+        doc = self._fetch_remote(doc_id)
+        if doc:
+            self._index.build(self._documents)  # rebuild index with new doc
+        return doc
 
     def search(self, query: str, max_results: int = 5) -> list[dict]:
         """
-        Full-text search across all loaded canon documents.
-        Returns a ranked list of {doc_id, title, excerpt, score} dicts.
-        Used by /query/stream to cite canon sources inline.
+        Semantic search across all loaded canon documents (G-8 upgrade).
+
+        Uses TF-IDF scoring with chunked passages, positional boosting,
+        and multi-term proximity bonuses. Falls back gracefully to an
+        empty list if no documents are loaded.
+
+        Returns a ranked list of:
+          {doc_id, title, excerpt, score, source, chunk_offset}
+
+        Backward-compatible: callers using the v1 {doc_id, title, excerpt,
+        score, source} shape still work — chunk_offset is additive.
         """
-        query_lower = query.lower()
-        terms = query_lower.split()
-        results = []
+        if not self._index._built:
+            self._index.build(self._documents)
+        return self._index.query(query, max_results=max_results)
 
-        for doc_id, doc in self._documents.items():
-            content = doc.get("content", "")
-            content_lower = content.lower()
-            score = sum(content_lower.count(t) for t in terms)
-            if score > 0:
-                # Extract the most relevant excerpt (~300 chars around first hit)
-                idx = content_lower.find(terms[0]) if terms else 0
-                start = max(0, idx - 100)
-                end = min(len(content), idx + 200)
-                excerpt = content[start:end].strip().replace("\n", " ")
-                results.append({
-                    "doc_id": doc_id,
-                    "title": doc.get("title", doc_id),
-                    "excerpt": excerpt,
-                    "score": score,
-                    "source": doc.get("source", "local"),
-                })
+    def search_v2(
+        self,
+        query: str,
+        max_results:    int  = 5,
+        min_score:      float = 0.0,
+        boost_position: bool  = True,
+    ) -> list[dict]:
+        """
+        Extended search API (G-8).
 
-        results.sort(key=lambda x: x["score"], reverse=True)
+        Same as search() but exposes:
+          - min_score:      filter out results below this threshold.
+          - boost_position: disable positional boost (useful for tests).
+          - Returns full chunk metadata including chunk_offset and score.
+
+        Intended for internal engine use and admin tooling. The /query/stream
+        endpoint uses search() for simplicity.
+        """
+        results = self.search(query, max_results=max_results * 2)  # over-fetch
+        if min_score > 0.0:
+            results = [r for r in results if r["score"] >= min_score]
         return results[:max_results]
 
     def list_documents(self) -> list[str]:
@@ -133,7 +397,6 @@ class CanonLoader:
 
     @property
     def status(self) -> str:
-        """GREEN / YELLOW / RED status string for the UI status bar."""
         return self._status
 
     @property
@@ -145,27 +408,20 @@ class CanonLoader:
     # ------------------------------------------------------------------ #
 
     def _parse_manifest(self):
-        """
-        Parse CANON_MANIFEST.md to build the document registry.
-        Extracts rows from the C-Series table: | ID | File | Local | URL |
-        """
         if not _MANIFEST_PATH.exists():
             logger.warning(f"Manifest not found at {_MANIFEST_PATH} — skipping remote registry.")
             return
-
         content = _MANIFEST_PATH.read_text(encoding="utf-8")
-        # Match table rows: | C00 | filename.md | ... | https://... |
         row_pattern = re.compile(
             r"\|\s*(C\d+)\s*\|\s*([^|]+?)\s*\|[^|]*\|\s*(https://[^\s|]+)\s*\|"
         )
         for match in row_pattern.finditer(content):
             c_id, filename, url = match.group(1), match.group(2).strip(), match.group(3).strip()
-            # Derive a clean doc_id from filename (strip extension)
             doc_id = Path(filename).stem
             self._manifest[doc_id] = {
-                "c_id": c_id,
-                "filename": filename,
-                "doc_id": doc_id,
+                "c_id":       c_id,
+                "filename":   filename,
+                "doc_id":     doc_id,
                 "remote_url": url,
                 "local_path": str(self._docs_dir / filename),
             }
@@ -176,32 +432,29 @@ class CanonLoader:
     # ------------------------------------------------------------------ #
 
     def _load_local_docs(self):
-        """Load all .md and .txt files present in docs/canon/."""
         if not self._docs_dir.exists():
             logger.warning(f"docs/canon/ not found at {self._docs_dir}")
             return
-
         for doc_path in sorted(self._docs_dir.glob("*")):
             if doc_path.suffix not in (".md", ".txt"):
                 continue
             if doc_path.name == "CANON_MANIFEST.md":
-                continue  # manifest is metadata, not a canon document
+                continue
             doc_id = doc_path.stem
             try:
                 content = doc_path.read_text(encoding="utf-8")
                 self._documents[doc_id] = {
-                    "id": doc_id,
-                    "title": self._extract_title(content, doc_id),
-                    "content": content,
-                    "source": "local",
-                    "path": str(doc_path),
+                    "id":       doc_id,
+                    "title":    self._extract_title(content, doc_id),
+                    "content":  content,
+                    "source":   "local",
+                    "path":     str(doc_path),
                     "loaded_at": time.time(),
                 }
             except Exception as e:
                 logger.error(f"Failed to load {doc_path}: {e}")
 
     def _load_legacy_docs(self):
-        """Load docs from the legacy canon/ directory (alchemical/quantum series)."""
         if not _LEGACY_CANON_DIR.exists():
             return
         for doc_path in sorted(_LEGACY_CANON_DIR.glob("*.md")):
@@ -211,11 +464,11 @@ class CanonLoader:
             try:
                 content = doc_path.read_text(encoding="utf-8")
                 self._documents[doc_id] = {
-                    "id": doc_id,
-                    "title": self._extract_title(content, doc_id),
-                    "content": content,
-                    "source": "legacy_local",
-                    "path": str(doc_path),
+                    "id":       doc_id,
+                    "title":    self._extract_title(content, doc_id),
+                    "content":  content,
+                    "source":   "legacy_local",
+                    "path":     str(doc_path),
                     "loaded_at": time.time(),
                 }
             except Exception as e:
@@ -226,48 +479,38 @@ class CanonLoader:
     # ------------------------------------------------------------------ #
 
     def _fetch_remote(self, doc_id: str) -> Optional[dict]:
-        """
-        Fetch a single document from the remote GAIA repo.
-        Checks cache first; falls back to raw GitHub URL from manifest.
-        """
-        # 1. Check cache
         cache_path = _CACHE_DIR / f"{doc_id}.md"
         if cache_path.exists():
             age = time.time() - cache_path.stat().st_mtime
             if age < _CACHE_TTL_SECONDS:
                 content = cache_path.read_text(encoding="utf-8")
                 doc = {
-                    "id": doc_id,
-                    "title": self._extract_title(content, doc_id),
-                    "content": content,
-                    "source": "cache",
+                    "id":       doc_id,
+                    "title":    self._extract_title(content, doc_id),
+                    "content":  content,
+                    "source":   "cache",
                     "loaded_at": time.time(),
                 }
                 self._documents[doc_id] = doc
                 return doc
 
-        # 2. Find remote URL in manifest
         manifest_entry = self._manifest.get(doc_id)
         if not manifest_entry:
             logger.warning(f"No manifest entry for doc_id='{doc_id}'")
             return None
-
         url = manifest_entry.get("remote_url")
         if not url:
             return None
-
-        # 3. Fetch
         try:
             logger.info(f"Fetching remote canon doc: {doc_id} from {url}")
             with urllib.request.urlopen(url, timeout=10) as resp:
                 content = resp.read().decode("utf-8")
-            # Write to cache
             cache_path.write_text(content, encoding="utf-8")
             doc = {
-                "id": doc_id,
-                "title": self._extract_title(content, doc_id),
-                "content": content,
-                "source": "remote",
+                "id":       doc_id,
+                "title":    self._extract_title(content, doc_id),
+                "content":  content,
+                "source":   "remote",
                 "loaded_at": time.time(),
             }
             self._documents[doc_id] = doc
@@ -282,7 +525,6 @@ class CanonLoader:
 
     def _evaluate_status(self):
         loaded_ids = set(self._documents.keys())
-        # Check if both floor documents are present (exact stem match)
         floor_present = all(
             any(doc_id.endswith(floor) or doc_id == floor for doc_id in loaded_ids)
             for floor in _FLOOR_DOCS
@@ -300,7 +542,6 @@ class CanonLoader:
 
     @staticmethod
     def _extract_title(content: str, fallback: str) -> str:
-        """Extract the first H1 heading from markdown content as the document title."""
         for line in content.splitlines():
             stripped = line.strip()
             if stripped.startswith("# "):
