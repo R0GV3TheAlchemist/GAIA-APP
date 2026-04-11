@@ -1,10 +1,9 @@
 /**
- * GAIA-APP — UI Shell
- * Handles navigation, theme toggle, live API calls to the constitutional core,
- * and ATLAS Earth Intelligence queries.
+ * GAIA-APP — UI Shell v1.1.0
+ * Sprint G-5: Fixed /status shape, /memory/list shape, replaced Atlas dot
+ * with GAIAN runtime dot.
  *
- * API target: http://localhost:8008 (dev) or GAIA_API_URL env (production)
- * Constitutional core lives in core/ (Python FastAPI server)
+ * API target: http://localhost:8008 (dev) or window.GAIA_API_URL (production)
  */
 
 (function () {
@@ -57,7 +56,6 @@
     navBtns.forEach(btn => {
       btn.classList.toggle('active', btn.getAttribute('data-view') === viewId);
     });
-    // Lazy-load view data
     if (viewId === 'memory') loadMemory();
     if (viewId === 'consent') loadConsent();
     if (viewId === 'canon') loadCanon();
@@ -82,18 +80,28 @@
     const status = await api('/status');
     if (status) {
       setDot('core', 'green', 'Core: Active');
-      setDot('canon', status.canon_loaded ? 'green' : 'yellow',
-             status.canon_loaded ? `Canon: Loaded (${status.canon_docs.length} docs)` : 'Canon: Loading');
+
+      // G-5 fix: server returns canon_docs (array) and canon_doc_count (int)
+      const docCount = status.canon_doc_count || 0;
+      const docsLoaded = status.canon_loaded;
+      setDot('canon',
+        docsLoaded ? 'green' : 'yellow',
+        docsLoaded ? `Canon: Loaded (${docCount} docs)` : 'Canon: Loading'
+      );
+
+      // G-5 fix: replaced Atlas dot with GAIAN runtime dot
+      const activeRuntimes = status.active_runtimes || 0;
+      const gaianNames = (status.gaian_names || []).slice(0, 3).join(', ');
+      setDot('gaians',
+        activeRuntimes > 0 ? 'green' : 'yellow',
+        activeRuntimes > 0
+          ? `GAIANs: ${activeRuntimes} active${gaianNames ? ' — ' + gaianNames : ''}`
+          : `GAIANs: ${status.gaians || 0} born`
+      );
     } else {
       setDot('core', 'red', 'Core: Offline — run python core/server.py');
       setDot('canon', 'red', 'Canon: Unreachable');
-    }
-    // Check ATLAS separately
-    const atlas = await api('/atlas/status');
-    if (atlas && atlas.atlas === 'connected') {
-      setDot('atlas', 'green', 'Atlas: Connected');
-    } else {
-      setDot('atlas', 'yellow', 'Atlas: Run earthengine authenticate');
+      setDot('gaians', 'red', 'GAIANs: Unreachable');
     }
   }
 
@@ -110,80 +118,48 @@
   }
 
   // --- Memory View ---
+  // G-5 fix: server returns {memories:[{query, timestamp, source_count}], count}
+  // The memory view renders conversation turns, not consent/privacy memory objects.
+  // Full memory management (inspect/delete individual items) is tracked in docs/ui-gap.md
+  // and deferred to G-12 (Consent + Memory ledger backend).
   async function loadMemory() {
     const list = document.getElementById('memory-list');
     if (!list) return;
     list.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
-    const memories = await api('/memory/list');
-    if (!memories || memories.length === 0) {
+    const data = await api('/memory/list');
+    const memories = data && data.memories ? data.memories : [];
+    if (memories.length === 0) {
       list.innerHTML = '<div class="empty-state"><p>No memories stored yet.</p><p class="muted">Memories appear here as you interact with GAIA.</p></div>';
       return;
     }
     list.innerHTML = memories.map(m => `
-      <div class="memory-entry" data-id="${m.memory_id}">
-        <div class="memory-content">${escHtml(m.content)}</div>
+      <div class="memory-entry">
+        <div class="memory-content">${escHtml(m.query || '')}</div>
         <div class="memory-meta">
-          <span class="tag">${escHtml(m.source)}</span>
-          <span class="tag">${(m.purposes || []).join(', ')}</span>
-          <span class="muted">${m.created_at ? m.created_at.slice(0, 10) : ''}</span>
-        </div>
-        <div class="memory-actions">
-          <button class="btn btn-ghost btn-sm" onclick="deleteMemory('${m.memory_id}')">Delete</button>
+          <span class="tag">${m.source_count != null ? m.source_count + ' sources' : ''}</span>
+          <span class="muted">${m.timestamp ? new Date(m.timestamp * 1000).toLocaleString() : ''}</span>
         </div>
       </div>
     `).join('');
   }
-
-  window.deleteMemory = async function(id) {
-    const res = await api('/memory/' + id, { method: 'DELETE' });
-    if (res && res.deleted) loadMemory();
-  };
 
   const btnRefreshMemory = document.getElementById('btn-refresh-memory');
   if (btnRefreshMemory) btnRefreshMemory.addEventListener('click', loadMemory);
 
   // --- Consent View ---
+  // G-5: /consent/ledger has no backend yet. Tracked in docs/ui-gap.md (G-12).
   async function loadConsent() {
     const list = document.getElementById('consent-list');
     if (!list) return;
-    const consents = await api('/consent/ledger');
-    if (!consents || consents.length === 0) {
-      list.innerHTML = '<div class="empty-state"><p>No consent records yet.</p><p class="muted">Consents appear here when you authorize GAIA to act on your behalf.</p></div>';
-      return;
-    }
-    const active = consents.filter(c => c.event === 'grant' && c.record && c.record.valid);
-    if (active.length === 0) {
-      list.innerHTML = '<div class="empty-state"><p>No active consents.</p></div>';
-      return;
-    }
-    list.innerHTML = active.map(c => `
-      <div class="consent-entry">
-        <div class="consent-purpose">${escHtml(c.record.purpose)}</div>
-        <div class="consent-meta">
-          <span class="tag">${escHtml(c.record.party_id)}</span>
-          <span class="muted">Expires: ${c.record.expires_at ? c.record.expires_at.slice(0, 10) : 'Never'}</span>
-        </div>
-        <div class="memory-actions">
-          <button class="btn btn-ghost btn-sm" onclick="revokeConsent('${c.record.party_id}', '${c.record.purpose}')">Revoke</button>
-        </div>
-      </div>
-    `).join('');
+    list.innerHTML = '<div class="empty-state"><p>Consent ledger coming soon.</p><p class="muted">All consents granted to GAIA will appear here. Revoke any at any time.</p></div>';
   }
-
-  window.revokeConsent = async function(partyId, purpose) {
-    await api('/consent/revoke', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ party_id: partyId, purpose: purpose })
-    });
-    loadConsent();
-  };
 
   // --- Canon View ---
   async function loadCanon() {
     const status = await api('/status');
     const list = document.getElementById('canon-list');
     if (!list) return;
+    // G-5 fix: server returns canon_docs (string array) and canon_doc_count
     const docs = status && status.canon_docs ? status.canon_docs : [];
     const docHtml = docs.length > 0
       ? docs.map(d => `<div class="canon-entry"><span class="tag">${escHtml(d)}</span></div>`).join('')
@@ -196,51 +172,15 @@
   }
 
   // --- ATLAS View ---
+  // G-5: Atlas backend (/atlas/*) not yet implemented. Tracked in docs/ui-gap.md (G-11).
   const btnQueryAtlas = document.getElementById('btn-query-atlas');
   if (btnQueryAtlas) {
     btnQueryAtlas.addEventListener('click', async () => {
       const lat = document.getElementById('atlas-lat').value;
       const lon = document.getElementById('atlas-lon').value;
       const results = document.getElementById('atlas-results');
-      results.innerHTML = '<div class="empty-state"><p>Querying Earth...</p></div>';
-      btnQueryAtlas.disabled = true;
 
-      const [temp, ndvi, air] = await Promise.all([
-        api(`/atlas/temperature?lat=${lat}&lon=${lon}`),
-        api(`/atlas/ndvi?lat=${lat}&lon=${lon}`),
-        api(`/atlas/air-quality?lat=${lat}&lon=${lon}`)
-      ]);
-
-      btnQueryAtlas.disabled = false;
-
-      if (!temp && !ndvi && !air) {
-        results.innerHTML = '<div class="empty-state"><p>ATLAS unavailable.</p><p class="muted">Run: earthengine authenticate</p></div>';
-        return;
-      }
-
-      results.innerHTML = `
-        <div class="atlas-grid">
-          <div class="atlas-card">
-            <div class="atlas-card-icon">🌡️</div>
-            <div class="atlas-card-label">Surface Temperature</div>
-            <div class="atlas-card-value">${temp && temp.temperature_celsius != null ? temp.temperature_celsius + '°C' : 'N/A'}</div>
-            <div class="atlas-card-source">${temp ? temp.source : ''}</div>
-          </div>
-          <div class="atlas-card">
-            <div class="atlas-card-icon">🌿</div>
-            <div class="atlas-card-label">Vegetation (NDVI)</div>
-            <div class="atlas-card-value">${ndvi && ndvi.ndvi_scaled != null ? ndvi.ndvi_scaled : 'N/A'}</div>
-            <div class="atlas-card-source">${ndvi ? ndvi.source : ''}</div>
-          </div>
-          <div class="atlas-card">
-            <div class="atlas-card-icon">💨</div>
-            <div class="atlas-card-label">Air Quality (NO₂)</div>
-            <div class="atlas-card-value">${air && air.no2_mol_per_m2 != null ? air.no2_mol_per_m2.toExponential(3) + ' mol/m²' : 'N/A'}</div>
-            <div class="atlas-card-source">${air ? air.source : ''}</div>
-          </div>
-        </div>
-        <p class="atlas-coords-label">📍 ${lat}, ${lon}</p>
-      `;
+      results.innerHTML = '<div class="empty-state"><p>ATLAS module not yet available.</p><p class="muted">Requires Google Earth Engine backend (G-11). Run <code>earthengine authenticate</code> to prepare.</p></div>';
     });
   }
 

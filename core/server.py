@@ -1,21 +1,13 @@
 """
-GAIA API Server — FastAPI + SSE streaming v1.3.0
+GAIA API Server — FastAPI + SSE streaming v1.3.1
 
-Sprint G-4: Structured logging integrated.
+Sprint G-5: UI Audit fixes.
 
-Changes from v1.2.0:
-  - core/logger.py structured logging layer integrated
-  - basicConfig replaced with get_logger(__name__)
-  - LoggingMiddleware added — every request stamped with correlation ID
-  - X-Correlation-ID header returned on every response
-  - Key events emit typed log_event() calls:
-      GAIAEvent.GAIAN_BORN, TURN_COMPLETE, TURN_ERROR,
-      TOKEN_ISSUED, CANON_LOADED, ENGINE_CHAIN,
-      SOUL_MIRROR_NUDGE, SCHUMANN_ALIGNED
-  - GAIA_LOG_FORMAT=text for dev, json (default) for production
-  - GAIA_LOG_LEVEL controls verbosity (default INFO)
+Changes from v1.3.0:
+  - /status response: added `canon_docs` (list[str]) field alongside
+    existing `canon_doc_count` (int) so the UI can render canon doc names
 
-Endpoints: (unchanged from v1.2.0)
+Endpoints: (unchanged from v1.3.0)
   POST /auth/token  GET /auth/me
   GET  /status  GET /canon/status  GET /memory/list
   GET  /gaians/base-forms  GET /gaians
@@ -85,7 +77,7 @@ from core.codex_stage_engine import NoosphericHealthSignals
 from core.zodiac_engine import ZodiacEngine, ZODIAC_FORM_MAP, ALL_SIGNS
 
 
-SERVER_VERSION = "1.3.0"
+SERVER_VERSION = "1.3.1"
 
 # ──────────────────────────────────────────────────────────────────── #
 #  Admin Avatar — The Builder                                                #
@@ -261,6 +253,7 @@ class SetGaianRequest(BaseModel):
 @app.get("/status")
 async def status():
     doc_count = len(canon.list_documents())
+    doc_names = canon.list_documents()          # G-5: expose list for UI
     gaians    = list_gaians()
     runtime_snapshots = {}
     for slug, rt in _RUNTIME_REGISTRY.items():
@@ -281,6 +274,7 @@ async def status():
         "canon_status":      canon.status,
         "canon_loaded":      canon.is_loaded,
         "canon_doc_count":   doc_count,
+        "canon_docs":        doc_names,         # G-5: list of doc name strings for UI
         "gaians":            len(gaians),
         "gaian_names":       [g["name"] for g in gaians],
         "base_forms":        len(list_base_forms()),
@@ -626,7 +620,6 @@ async def gaian_chat(
 
             result = rt.process(req.message, noosphere=noosphere)
 
-            # Log engine chain results
             log_event(
                 GAIAEvent.ENGINE_CHAIN,
                 message=f"Engine chain: {slug} exchange={rt.attachment.total_exchanges}",
