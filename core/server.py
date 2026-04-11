@@ -1,30 +1,18 @@
 """
-GAIA API Server — FastAPI + SSE streaming v1.4.0
+GAIA API Server — FastAPI + SSE streaming v1.5.0
 
-Sprint G-6: Global error boundary.
+Sprint G-7: Rate limiting + abuse protection.
 
-Changes from v1.3.1:
-  - install_error_handlers(app) called immediately after app = FastAPI(...)
-  - All unhandled exceptions now return a structured JSON envelope instead
-    of FastAPI's default {"detail": ...} shape
-  - X-Correlation-ID header is present on every error response
-  - No internal tracebacks are ever leaked to clients
+Changes from v1.4.0:
+  - RateLimitMiddleware added (global IP limiter: 120 req/60s)
+  - rate_limit() dependency applied to:
+      POST /gaians/{slug}/chat      — 30 req/60s per user, scope="chat"
+      POST /query/stream            — 20 req/60s per user, scope="query"
+      POST /gaians/birth            —  5 req/60s per user, scope="birth"
+      POST /auth/token              — 10 req/60s per IP,   scope="auth_token"
+  - /status is bypass-listed (never rate-limited)
 
-Endpoints: (unchanged from v1.3.1)
-  POST /auth/token  GET /auth/me
-  GET  /status  GET /canon/status  GET /memory/list
-  GET  /gaians/base-forms  GET /gaians
-  POST /gaians  POST /gaians/birth
-  GET  /gaians/{slug}  GET /gaians/{slug}/identity
-  POST /gaians/{slug}/remember  POST /gaians/{slug}/memory
-  GET  /gaians/{slug}/runtime-status
-  POST /gaians/{slug}/chat
-  GET  /gaians/{slug}/resonance  GET /gaians/{slug}/soul-mirror
-  POST /session/{session_id}/gaian
-  POST /query/stream
-  GET  /zodiac/preview  GET /zodiac/all
-  GET  /admin/me
-
+Endpoints: (unchanged from v1.4.0)
 Canon Ref: C01, C15, C17, C21, C30
 """
 
@@ -47,7 +35,6 @@ try:
 except ImportError:
     pass
 
-# ── Structured logging must be configured before any other import logs ──
 from core.logger import (
     GAIAEvent,
     LoggingMiddleware,
@@ -79,13 +66,10 @@ from core.gaian_birth import BirthRitual, GaianBirthParams
 from core.codex_stage_engine import NoosphericHealthSignals
 from core.zodiac_engine import ZodiacEngine, ZODIAC_FORM_MAP, ALL_SIGNS
 from core.error_boundary import install_error_handlers
+from core.rate_limiter import RateLimitMiddleware, rate_limit
 
 
-SERVER_VERSION = "1.4.0"
-
-# ──────────────────────────────────────────────────────────────────── #
-#  Admin Avatar — The Builder                                                #
-# ──────────────────────────────────────────────────────────────────── #
+SERVER_VERSION = "1.5.0"
 
 _ADMIN_IDENTITY = {
     "handle":          "R0GV3TheAlchemist",
@@ -106,11 +90,6 @@ _ADMIN_IDENTITY = {
     "canon_ref":       "https://github.com/R0GV3TheAlchemist/GAIA",
 }
 
-
-# ──────────────────────────────────────────────────────────────────── #
-#  Bootstrap                                                                  #
-# ──────────────────────────────────────────────────────────────────── #
-
 _CORS_ORIGINS = [
     o.strip()
     for o in os.environ.get(
@@ -122,11 +101,12 @@ _CORS_ORIGINS = [
 
 app = FastAPI(title="GAIA API", version=SERVER_VERSION)
 
-# G-6: Install error boundary FIRST — before middleware and routes
+# G-6: error boundary first
 install_error_handlers(app)
 
-# Middleware order: logging first (outermost), then CORS
+# Middleware stack (outermost → innermost): Logging → RateLimit → CORS
 app.add_middleware(LoggingMiddleware)
+app.add_middleware(RateLimitMiddleware)   # G-7
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
@@ -135,7 +115,6 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Correlation-ID"],
 )
 
-# Mount auth router
 app.include_router(auth_router)
 
 canon = CanonLoader()
@@ -151,10 +130,6 @@ log_event(GAIAEvent.CANON_LOADED,
           message=f"Canon loaded: {len(canon.list_documents())} docs status={canon.status}",
           doc_count=len(canon.list_documents()), canon_status=canon.status)
 
-
-# ──────────────────────────────────────────────────────────────────── #
-#  Runtime Registry                                                           #
-# ──────────────────────────────────────────────────────────────────── #
 
 _RUNTIME_REGISTRY: dict[str, GAIANRuntime] = {}
 GAIANS_MEMORY_DIR = os.environ.get("GAIANS_MEMORY_DIR", "./gaians")
@@ -203,9 +178,9 @@ def _get_runtime(slug: str, gaian: Optional[GaianMemory] = None) -> GAIANRuntime
     return _RUNTIME_REGISTRY[slug]
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  Pydantic Models                                                            #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  Pydantic Models                                                    #
+# ------------------------------------------------------------------ #
 
 class QueryRequest(BaseModel):
     query:             str
@@ -253,9 +228,9 @@ class SetGaianRequest(BaseModel):
     gaian_slug: str
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  Status (public)                                                            #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  Status (public)                                                    #
+# ------------------------------------------------------------------ #
 
 @app.get("/status")
 async def status():
@@ -277,6 +252,7 @@ async def status():
         "sovereignty":       "enforced",
         "auth":              "jwt-hs256",
         "logging":           "structured",
+        "rate_limiting":     "sliding-window",
         "admin":             _ADMIN_IDENTITY["handle"],
         "canon_status":      canon.status,
         "canon_loaded":      canon.is_loaded,
@@ -316,9 +292,9 @@ async def memory_list(session_id: Optional[str] = None):
     return {"memories": memories, "count": len(memories)}
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  Admin [admin role required]                                               #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  Admin                                                              #
+# ------------------------------------------------------------------ #
 
 @app.get("/admin/me")
 async def admin_me(user: TokenPayload = Depends(require_admin)):
@@ -335,9 +311,9 @@ async def admin_me(user: TokenPayload = Depends(require_admin)):
     }
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  Zodiac (public)                                                            #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  Zodiac (public)                                                    #
+# ------------------------------------------------------------------ #
 
 @app.get("/zodiac/preview")
 async def zodiac_preview(
@@ -379,18 +355,18 @@ async def zodiac_all():
     return {"zodiac_map": rows, "count": len(rows)}
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  Base Forms (public)                                                        #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  Base Forms (public)                                                #
+# ------------------------------------------------------------------ #
 
 @app.get("/gaians/base-forms")
 async def get_base_forms():
     return {"base_forms": list_base_forms()}
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  GAIAN Endpoints                                                            #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  GAIAN Endpoints                                                    #
+# ------------------------------------------------------------------ #
 
 @app.get("/gaians")
 async def get_gaians():
@@ -430,6 +406,7 @@ async def post_create_gaian(
 async def post_birth_gaian(
     req: BirthRequest,
     user: TokenPayload = Depends(require_auth),
+    _rl=Depends(rate_limit(max_requests=5, window_seconds=60, scope="birth")),
 ):
     existing = load_gaian(req.name.lower().replace(" ", "_")[:24])
     if existing:
@@ -587,15 +564,16 @@ async def get_runtime_status(slug: str):
     return rt.get_status()
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  GAIAN Chat [auth required]                                                #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  GAIAN Chat [auth + rate limited]                                   #
+# ------------------------------------------------------------------ #
 
 @app.post("/gaians/{slug}/chat")
 async def gaian_chat(
     slug: str,
     req: ChatRequest,
     user: TokenPayload = Depends(require_auth),
+    _rl=Depends(rate_limit(max_requests=30, window_seconds=60, scope="chat")),
 ):
     gaian = load_gaian(slug)
     if not gaian:
@@ -756,9 +734,9 @@ async def get_gaian_soul_mirror(slug: str):
     }
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  Session [auth required]                                                   #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  Session                                                            #
+# ------------------------------------------------------------------ #
 
 @app.post("/session/{session_id}/gaian")
 async def set_session_gaian(
@@ -774,14 +752,15 @@ async def set_session_gaian(
     return {"status": "ok", "gaian": gaian.name, "session_id": session_id, "user_id": user.user_id}
 
 
-# ──────────────────────────────────────────────────────────────────── #
-#  Perplexity-Style Query Stream [auth required]                             #
-# ──────────────────────────────────────────────────────────────────── #
+# ------------------------------------------------------------------ #
+#  Query Stream [auth + rate limited]                                 #
+# ------------------------------------------------------------------ #
 
 @app.post("/query/stream")
 async def query_stream(
     req: QueryRequest,
     user: TokenPayload = Depends(require_auth),
+    _rl=Depends(rate_limit(max_requests=20, window_seconds=60, scope="query")),
 ):
     session_id = req.session_id or str(uuid.uuid4())
     session    = get_or_create_session(session_id)
@@ -882,10 +861,6 @@ def _generate_suggestions(query: str, sources: list[dict]) -> list[str]:
     suggestions.append("What are the practical implications?")
     return suggestions[:3]
 
-
-# ──────────────────────────────────────────────────────────────────── #
-#  Entry Point                                                                #
-# ──────────────────────────────────────────────────────────────────── #
 
 if __name__ == "__main__":
     import uvicorn
