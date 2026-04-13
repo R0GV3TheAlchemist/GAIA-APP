@@ -30,7 +30,6 @@ import types
 from unittest.mock import MagicMock, patch
 
 import pytest
-import pytest_asyncio  # noqa: F401 — ensures plugin is loaded
 
 from core.inference_router import (
     EpistemicLabel,
@@ -56,9 +55,8 @@ from core.inference_router import (
 #  pytest-asyncio configuration                                        #
 # ================================================================== #
 
-# Tell pytest-asyncio to treat every async test as asyncio automatically.
-# Works with pytest-asyncio >= 0.21 (asyncio_mode=auto in pytest.ini
-# or via marker). We use the per-module approach here for portability.
+# asyncio_mode = auto is set in pytest.ini — every async def test in
+# this module is automatically treated as an asyncio test.
 pytestmark = pytest.mark.asyncio
 
 
@@ -67,7 +65,7 @@ pytestmark = pytest.mark.asyncio
 # ================================================================== #
 
 async def _fake_stream(*args, **kwargs):
-    """Minimal async generator that yields a single token."""
+    """Minimal async generator that yields two tokens."""
     yield "hello"
     yield " world"
 
@@ -293,16 +291,15 @@ class TestReadCriticality:
     """
     _read_criticality() does a local import:
         from core.criticality_monitor import get_monitor
-    We must inject a fake `core.criticality_monitor` module into
-    sys.modules so the local import resolves to our mock.
+    We inject a fake `core.criticality_monitor` module into sys.modules
+    so the local import resolves to our mock.
     """
 
     def _patch_monitor(self, regime: str):
         mock_monitor = MagicMock()
         mock_monitor.get_state.return_value = {"regime": regime}
         mock_get = MagicMock(return_value=mock_monitor)
-        fake_mod = _make_fake_module("core.criticality_monitor", get_monitor=mock_get)
-        return fake_mod, mock_get
+        _make_fake_module("core.criticality_monitor", get_monitor=mock_get)
 
     def test_too_ordered_raises_temperature(self):
         self._patch_monitor("too_ordered")
@@ -350,7 +347,6 @@ class TestReadNoosphereResonance:
         mock_ns.get_noosphere_status.return_value = {"resonance_label": resonance_label}
         mock_get = MagicMock(return_value=mock_ns)
         _make_fake_module("core.noosphere", get_noosphere=mock_get)
-        return mock_ns
 
     def test_returns_label_when_present(self):
         self._patch_ns("grief")
@@ -386,7 +382,7 @@ class TestEnrichWithCanon:
     """
     _enrich_with_canon() does a local import:
         from core.canon_loader import CanonLoader
-    Inject a fake module.
+    Inject a fake module into sys.modules.
     """
 
     def test_deduplicates_existing_t1_docs(self):
@@ -447,7 +443,6 @@ class TestRouterStream:
 
     def setup_method(self):
         _reset_backend_health()
-        # Provide a real fake synthesizer module so router's local import works
         fake_synth = types.ModuleType("core.synthesizer")
         fake_synth.stream_synthesis = _fake_stream
         sys.modules["core.synthesizer"] = fake_synth
@@ -532,8 +527,7 @@ class TestRouterStream:
         fake_synth.stream_synthesis = capturing_stream
         sys.modules["core.synthesizer"] = fake_synth
 
-        with patch("core.inference_router._read_noosphere_resonance",
-                   return_value="grief"):
+        with patch("core.inference_router._read_noosphere_resonance", return_value="grief"):
             await router.complete(req, meta)
 
         assert meta.noosphere_resonance == "grief"
@@ -558,8 +552,7 @@ class TestRouterStream:
         fake_synth.stream_synthesis = capturing_stream
         sys.modules["core.synthesizer"] = fake_synth
 
-        with patch("core.inference_router._read_criticality",
-                   return_value=("too_ordered", 0.65)):
+        with patch("core.inference_router._read_criticality", return_value=("too_ordered", 0.65)):
             await router.complete(req, meta)
 
         assert meta.criticality_state == "too_ordered"
@@ -584,8 +577,7 @@ class TestRouterStream:
         fake_synth.stream_synthesis = capturing_stream
         sys.modules["core.synthesizer"] = fake_synth
 
-        with patch("core.inference_router._read_criticality",
-                   return_value=("too_chaotic", 0.20)):
+        with patch("core.inference_router._read_criticality", return_value=("too_chaotic", 0.20)):
             await router.complete(req)
 
         assert "Ground the response" in captured_prompt[0]

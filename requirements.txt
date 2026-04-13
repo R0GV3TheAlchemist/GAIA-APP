@@ -29,3 +29,6 @@ anthropic>=0.25.0           # Anthropic Claude   (set ANTHROPIC_API_KEY)
 
 # ── Earth Intelligence (ATLAS layer) ──────────────────────────────────
 # earthengine-api>=0.1.390  # Google Earth Engine (run: earthengine authenticate)
+
+# ── Test tooling ──────────────────────────────────────────────────────
+pytest-asyncio>=0.23.0      # async def test support (asyncio_mode=auto via pytest.ini)
