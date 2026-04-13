@@ -23,12 +23,14 @@ Coverage targets
 
 from __future__ import annotations
 
-import asyncio
 import os
+import sys
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+import types
+from unittest.mock import MagicMock, patch
 
 import pytest
+import pytest_asyncio  # noqa: F401 — ensures plugin is loaded
 
 from core.inference_router import (
     EpistemicLabel,
@@ -51,13 +53,18 @@ from core.inference_router import (
 
 
 # ================================================================== #
-#  Helpers                                                             #
+#  pytest-asyncio configuration                                        #
 # ================================================================== #
 
-def _run(coro):
-    """Run a coroutine in the default event loop (pytest-asyncio not required)."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+# Tell pytest-asyncio to treat every async test as asyncio automatically.
+# Works with pytest-asyncio >= 0.21 (asyncio_mode=auto in pytest.ini
+# or via marker). We use the per-module approach here for portability.
+pytestmark = pytest.mark.asyncio
 
+
+# ================================================================== #
+#  Helpers                                                             #
+# ================================================================== #
 
 async def _fake_stream(*args, **kwargs):
     """Minimal async generator that yields a single token."""
@@ -70,6 +77,15 @@ def _reset_backend_health():
     for b in InferenceBackend:
         _BACKEND_HEALTH[b] = True
     _BACKEND_FAILURE_TS.clear()
+
+
+def _make_fake_module(name: str, **attrs) -> types.ModuleType:
+    """Create a lightweight fake module and inject it into sys.modules."""
+    mod = types.ModuleType(name)
+    for k, v in attrs.items():
+        setattr(mod, k, v)
+    sys.modules[name] = mod
+    return mod
 
 
 # ================================================================== #
@@ -111,13 +127,15 @@ class TestProbeBackendAvailability:
 
     def test_falls_back_when_no_keys(self):
         """No env vars set → should return FALLBACK."""
-        env = {k: "" for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-                                "OLLAMA_MODEL", "OLLAMA_ENABLED")}
-        with patch.dict(os.environ, env, clear=False):
-            # Temporarily clear the keys
-            for k in env:
-                os.environ.pop(k, None)
+        saved = {}
+        for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_MODEL", "OLLAMA_ENABLED"):
+            saved[k] = os.environ.pop(k, None)
+        try:
             result = _probe_backend_availability()
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
         assert result == InferenceBackend.FALLBACK
 
     def test_selects_openai_when_key_present(self):
@@ -126,32 +144,36 @@ class TestProbeBackendAvailability:
         assert result == InferenceBackend.OPENAI
 
     def test_skips_openai_selects_anthropic(self):
-        env = {"ANTHROPIC_API_KEY": "anth-test"}
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop("OPENAI_API_KEY", None)
-            result = _probe_backend_availability()
+        saved_openai = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "anth-test"}):
+                result = _probe_backend_availability()
+        finally:
+            if saved_openai is not None:
+                os.environ["OPENAI_API_KEY"] = saved_openai
         assert result == InferenceBackend.ANTHROPIC
 
     def test_selects_ollama_when_enabled(self):
-        env = {"OLLAMA_ENABLED": "1"}
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop("OPENAI_API_KEY", None)
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            result = _probe_backend_availability()
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")}
+        try:
+            with patch.dict(os.environ, {"OLLAMA_ENABLED": "1"}):
+                result = _probe_backend_availability()
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
         assert result == InferenceBackend.OLLAMA
 
     def test_skips_failed_backend_within_recovery_window(self):
-        """A recently-failed OPENAI backend should be skipped."""
         _BACKEND_HEALTH[InferenceBackend.OPENAI] = False
-        _BACKEND_FAILURE_TS[InferenceBackend.OPENAI] = time.monotonic()  # just failed
+        _BACKEND_FAILURE_TS[InferenceBackend.OPENAI] = time.monotonic()
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             result = _probe_backend_availability()
-        # Should NOT be OPENAI since it's within the recovery window
         assert result != InferenceBackend.OPENAI
         _reset_backend_health()
 
     def test_re_probes_backend_after_recovery_window(self):
-        """A backend failed long ago should be optimistically re-probed."""
         _BACKEND_HEALTH[InferenceBackend.OPENAI] = False
         _BACKEND_FAILURE_TS[InferenceBackend.OPENAI] = (
             time.monotonic() - _BACKEND_RECOVERY_WINDOW - 1
@@ -210,7 +232,6 @@ class TestBuildMemoryBlock:
     def test_truncates_long_term_to_last_20(self):
         memories = [f"mem-{i}" for i in range(30)]
         block = _build_memory_block(memories, [])
-        # mem-0 through mem-9 should be dropped; mem-10 onward kept
         assert "mem-10" in block
         assert "mem-0" not in block
 
@@ -235,9 +256,7 @@ class TestInferEpistemicLabel:
         assert label == EpistemicLabel.CONVERSATIONAL
 
     def test_canon_cited_when_doc_ids_present(self):
-        label = _infer_epistemic_label(
-            "What is noosphere?", [], ["C43", "C44"]
-        )
+        label = _infer_epistemic_label("What is noosphere?", [], ["C43", "C44"])
         assert label == EpistemicLabel.CANON_CITED
 
     def test_verified_when_two_web_sources(self):
@@ -271,44 +290,48 @@ class TestInferEpistemicLabel:
 # ================================================================== #
 
 class TestReadCriticality:
-    def test_too_ordered_raises_temperature(self):
+    """
+    _read_criticality() does a local import:
+        from core.criticality_monitor import get_monitor
+    We must inject a fake `core.criticality_monitor` module into
+    sys.modules so the local import resolves to our mock.
+    """
+
+    def _patch_monitor(self, regime: str):
         mock_monitor = MagicMock()
-        mock_monitor.get_state.return_value = {"regime": "too_ordered"}
-        with patch("core.inference_router.get_monitor", return_value=mock_monitor,
-                   create=True):
-            with patch("core.criticality_monitor.get_monitor", return_value=mock_monitor,
-                       create=True):
-                regime, temp = _read_criticality()
+        mock_monitor.get_state.return_value = {"regime": regime}
+        mock_get = MagicMock(return_value=mock_monitor)
+        fake_mod = _make_fake_module("core.criticality_monitor", get_monitor=mock_get)
+        return fake_mod, mock_get
+
+    def test_too_ordered_raises_temperature(self):
+        self._patch_monitor("too_ordered")
+        regime, temp = _read_criticality()
         assert regime == "too_ordered"
         assert temp == pytest.approx(0.65)
 
     def test_critical_balanced_temperature(self):
-        mock_monitor = MagicMock()
-        mock_monitor.get_state.return_value = {"regime": "critical"}
-        with patch("core.criticality_monitor.get_monitor", return_value=mock_monitor,
-                   create=True):
-            regime, temp = _read_criticality()
+        self._patch_monitor("critical")
+        regime, temp = _read_criticality()
         assert regime == "critical"
         assert temp == pytest.approx(0.42)
 
     def test_too_chaotic_lowers_temperature(self):
-        mock_monitor = MagicMock()
-        mock_monitor.get_state.return_value = {"regime": "too_chaotic"}
-        with patch("core.criticality_monitor.get_monitor", return_value=mock_monitor,
-                   create=True):
-            regime, temp = _read_criticality()
+        self._patch_monitor("too_chaotic")
+        regime, temp = _read_criticality()
         assert regime == "too_chaotic"
         assert temp == pytest.approx(0.20)
 
     def test_graceful_failure_returns_critical_default(self):
-        """If criticality_monitor raises, returns safe defaults."""
-        with patch("core.inference_router._read_criticality",
-                   side_effect=Exception("monitor offline")):
-            try:
-                r, t = _read_criticality()
-            except Exception:
-                r, t = "critical", 0.42
-        assert t == pytest.approx(0.42)
+        """If the monitor import raises, returns safe defaults."""
+        bad_mod = types.ModuleType("core.criticality_monitor")
+        def _bad_get_monitor():
+            raise RuntimeError("monitor offline")
+        bad_mod.get_monitor = _bad_get_monitor
+        sys.modules["core.criticality_monitor"] = bad_mod
+        regime, temp = _read_criticality()
+        assert regime == "critical"
+        assert temp == pytest.approx(0.42)
 
 
 # ================================================================== #
@@ -316,31 +339,42 @@ class TestReadCriticality:
 # ================================================================== #
 
 class TestReadNoosphereResonance:
-    def test_returns_label_when_present(self):
+    """
+    _read_noosphere_resonance() does a local import:
+        from core.noosphere import get_noosphere
+    Inject a fake module into sys.modules.
+    """
+
+    def _patch_ns(self, resonance_label):
         mock_ns = MagicMock()
-        mock_ns.get_noosphere_status.return_value = {"resonance_label": "grief"}
-        with patch("core.noosphere.get_noosphere", return_value=mock_ns, create=True):
-            label = _read_noosphere_resonance()
+        mock_ns.get_noosphere_status.return_value = {"resonance_label": resonance_label}
+        mock_get = MagicMock(return_value=mock_ns)
+        _make_fake_module("core.noosphere", get_noosphere=mock_get)
+        return mock_ns
+
+    def test_returns_label_when_present(self):
+        self._patch_ns("grief")
+        label = _read_noosphere_resonance()
         assert label == "grief"
 
     def test_returns_none_when_label_is_none_string(self):
-        mock_ns = MagicMock()
-        mock_ns.get_noosphere_status.return_value = {"resonance_label": "none"}
-        with patch("core.noosphere.get_noosphere", return_value=mock_ns, create=True):
-            label = _read_noosphere_resonance()
+        self._patch_ns("none")
+        label = _read_noosphere_resonance()
         assert label is None
 
     def test_returns_none_when_key_missing(self):
         mock_ns = MagicMock()
         mock_ns.get_noosphere_status.return_value = {}
-        with patch("core.noosphere.get_noosphere", return_value=mock_ns, create=True):
-            label = _read_noosphere_resonance()
+        mock_get = MagicMock(return_value=mock_ns)
+        _make_fake_module("core.noosphere", get_noosphere=mock_get)
+        label = _read_noosphere_resonance()
         assert label is None
 
     def test_returns_none_on_exception(self):
-        with patch("core.noosphere.get_noosphere", side_effect=RuntimeError("offline"),
-                   create=True):
-            label = _read_noosphere_resonance()
+        def _bad():
+            raise RuntimeError("offline")
+        _make_fake_module("core.noosphere", get_noosphere=_bad)
+        label = _read_noosphere_resonance()
         assert label is None
 
 
@@ -349,6 +383,12 @@ class TestReadNoosphereResonance:
 # ================================================================== #
 
 class TestEnrichWithCanon:
+    """
+    _enrich_with_canon() does a local import:
+        from core.canon_loader import CanonLoader
+    Inject a fake module.
+    """
+
     def test_deduplicates_existing_t1_docs(self):
         existing = [{"tier": "T1", "doc_id": "C43", "title": "Noosphere", "excerpt": "..."}]
         mock_loader = MagicMock()
@@ -357,15 +397,18 @@ class TestEnrichWithCanon:
             {"doc_id": "C43", "title": "Noosphere", "excerpt": "..."},
             {"doc_id": "C44", "title": "Polyglot", "excerpt": "..."},
         ]
-        with patch("core.canon_loader.CanonLoader", return_value=mock_loader):
-            enriched, doc_ids = _enrich_with_canon("query", existing, max_results=3)
-        assert "C43" not in doc_ids         # already present — not re-added
-        assert "C44" in doc_ids              # new — added
+        MockCanonLoader = MagicMock(return_value=mock_loader)
+        _make_fake_module("core.canon_loader", CanonLoader=MockCanonLoader)
+        enriched, doc_ids = _enrich_with_canon("query", existing, max_results=3)
+        assert "C43" not in doc_ids
+        assert "C44" in doc_ids
 
     def test_returns_existing_sources_on_failure(self):
         existing = [{"tier": "T2", "title": "Web"}]
-        with patch("core.canon_loader.CanonLoader", side_effect=Exception("disk error")):
-            enriched, doc_ids = _enrich_with_canon("query", existing)
+        def _bad_init():
+            raise Exception("disk error")
+        _make_fake_module("core.canon_loader", CanonLoader=_bad_init)
+        enriched, doc_ids = _enrich_with_canon("query", existing)
         assert enriched == existing
         assert doc_ids == []
 
@@ -404,8 +447,12 @@ class TestRouterStream:
 
     def setup_method(self):
         _reset_backend_health()
+        # Provide a real fake synthesizer module so router's local import works
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = _fake_stream
+        sys.modules["core.synthesizer"] = fake_synth
 
-    def test_complete_returns_concatenated_chunks(self):
+    async def test_complete_returns_concatenated_chunks(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="Hello GAIA",
@@ -414,11 +461,10 @@ class TestRouterStream:
             enrich_noosphere=False,
         )
         meta = InferenceResponse()
-        with patch("core.synthesizer.stream_synthesis", new=_fake_stream):
-            result = _run(router.complete(req, meta))
+        result = await router.complete(req, meta)
         assert result == "hello world"
 
-    def test_meta_backend_used_is_populated(self):
+    async def test_meta_backend_used_is_populated(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="test",
@@ -428,11 +474,10 @@ class TestRouterStream:
             enrich_noosphere=False,
         )
         meta = InferenceResponse()
-        with patch("core.synthesizer.stream_synthesis", new=_fake_stream):
-            _run(router.complete(req, meta))
+        await router.complete(req, meta)
         assert meta.backend_used == InferenceBackend.FALLBACK
 
-    def test_meta_duration_ms_is_set(self):
+    async def test_meta_duration_ms_is_set(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="test",
@@ -441,11 +486,10 @@ class TestRouterStream:
             enrich_noosphere=False,
         )
         meta = InferenceResponse()
-        with patch("core.synthesizer.stream_synthesis", new=_fake_stream):
-            _run(router.complete(req, meta))
+        await router.complete(req, meta)
         assert meta.duration_ms > 0
 
-    def test_meta_epistemic_label_speculative_when_no_sources(self):
+    async def test_meta_epistemic_label_speculative_when_no_sources(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="What happens after death?",
@@ -454,11 +498,10 @@ class TestRouterStream:
             enrich_noosphere=False,
         )
         meta = InferenceResponse()
-        with patch("core.synthesizer.stream_synthesis", new=_fake_stream):
-            _run(router.complete(req, meta))
+        await router.complete(req, meta)
         assert meta.epistemic_label == EpistemicLabel.SPECULATIVE
 
-    def test_call_count_increments(self):
+    async def test_call_count_increments(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="count me",
@@ -466,13 +509,11 @@ class TestRouterStream:
             enrich_criticality=False,
             enrich_noosphere=False,
         )
-        with patch("core.synthesizer.stream_synthesis", new=_fake_stream):
-            _run(router.complete(req))
-            _run(router.complete(req))
+        await router.complete(req)
+        await router.complete(req)
         assert router._call_count == 2
 
-    def test_noosphere_label_injected_into_prompt(self):
-        """When noosphere returns a label, it appears in the built prompt."""
+    async def test_noosphere_label_injected_into_prompt(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="tell me about grief",
@@ -487,16 +528,18 @@ class TestRouterStream:
             captured_prompt.append(gaian_prompt)
             yield "ok"
 
-        with patch("core.synthesizer.stream_synthesis", new=capturing_stream), \
-             patch("core.inference_router._read_noosphere_resonance",
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = capturing_stream
+        sys.modules["core.synthesizer"] = fake_synth
+
+        with patch("core.inference_router._read_noosphere_resonance",
                    return_value="grief"):
-            _run(router.complete(req, meta))
+            await router.complete(req, meta)
 
         assert meta.noosphere_resonance == "grief"
         assert "NOOSPHERE RESONANCE" in captured_prompt[0]
 
-    def test_criticality_too_ordered_prompt_injection(self):
-        """too_ordered regime adds creative leap notice to prompt."""
+    async def test_criticality_too_ordered_prompt_injection(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="expand this idea",
@@ -511,16 +554,19 @@ class TestRouterStream:
             captured_prompt.append(gaian_prompt)
             yield "ok"
 
-        with patch("core.synthesizer.stream_synthesis", new=capturing_stream), \
-             patch("core.inference_router._read_criticality",
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = capturing_stream
+        sys.modules["core.synthesizer"] = fake_synth
+
+        with patch("core.inference_router._read_criticality",
                    return_value=("too_ordered", 0.65)):
-            _run(router.complete(req, meta))
+            await router.complete(req, meta)
 
         assert meta.criticality_state == "too_ordered"
         assert "CRITICALITY NOTICE" in captured_prompt[0]
         assert "creative leaps" in captured_prompt[0]
 
-    def test_criticality_too_chaotic_prompt_injection(self):
+    async def test_criticality_too_chaotic_prompt_injection(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="ground me",
@@ -534,14 +580,17 @@ class TestRouterStream:
             captured_prompt.append(gaian_prompt)
             yield "ok"
 
-        with patch("core.synthesizer.stream_synthesis", new=capturing_stream), \
-             patch("core.inference_router._read_criticality",
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = capturing_stream
+        sys.modules["core.synthesizer"] = fake_synth
+
+        with patch("core.inference_router._read_criticality",
                    return_value=("too_chaotic", 0.20)):
-            _run(router.complete(req))
+            await router.complete(req)
 
         assert "Ground the response" in captured_prompt[0]
 
-    def test_memory_block_injected_into_prompt(self):
+    async def test_memory_block_injected_into_prompt(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="remember me",
@@ -557,14 +606,15 @@ class TestRouterStream:
             captured_prompt.append(gaian_prompt)
             yield "ok"
 
-        with patch("core.synthesizer.stream_synthesis", new=capturing_stream):
-            _run(router.complete(req))
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = capturing_stream
+        sys.modules["core.synthesizer"] = fake_synth
 
+        await router.complete(req)
         assert "I love the sea" in captured_prompt[0]
         assert "user is in grief mode" in captured_prompt[0]
 
-    def test_backend_failure_triggers_fallback(self):
-        """Primary backend raises → meta.backend_used flips to FALLBACK."""
+    async def test_backend_failure_triggers_fallback(self):
         _reset_backend_health()
         router = GAIAInferenceRouter()
         req = InferenceRequest(
@@ -575,23 +625,23 @@ class TestRouterStream:
             enrich_noosphere=False,
         )
         meta = InferenceResponse()
-        call_count = {"n": 0}
 
         async def failing_then_ok(query, sources, provider, gaian_prompt, **kw):
-            call_count["n"] += 1
             if provider == "openai":
                 raise RuntimeError("LLM timeout")
             yield "fallback response"
 
-        with patch("core.synthesizer.stream_synthesis", new=failing_then_ok):
-            result = _run(router.complete(req, meta))
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = failing_then_ok
+        sys.modules["core.synthesizer"] = fake_synth
 
+        result = await router.complete(req, meta)
         assert meta.backend_used == InferenceBackend.FALLBACK
         assert meta.error is not None
         assert "fallback response" in result
         _reset_backend_health()
 
-    def test_gaian_system_prompt_used_when_provided(self):
+    async def test_gaian_system_prompt_used_when_provided(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="hello",
@@ -606,12 +656,14 @@ class TestRouterStream:
             captured.append(gaian_prompt)
             yield "ok"
 
-        with patch("core.synthesizer.stream_synthesis", new=capturing_stream):
-            _run(router.complete(req))
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = capturing_stream
+        sys.modules["core.synthesizer"] = fake_synth
 
+        await router.complete(req)
         assert captured[0].startswith("Custom GAIAN voice prompt.")
 
-    def test_default_system_prompt_used_when_no_gaian(self):
+    async def test_default_system_prompt_used_when_no_gaian(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="hello",
@@ -626,13 +678,14 @@ class TestRouterStream:
             captured.append(gaian_prompt)
             yield "ok"
 
-        with patch("core.synthesizer.stream_synthesis", new=capturing_stream):
-            _run(router.complete(req))
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = capturing_stream
+        sys.modules["core.synthesizer"] = fake_synth
 
-        assert "GAIA" in captured[0]  # default prompt mentions GAIA
+        await router.complete(req)
+        assert "GAIA" in captured[0]
 
-    def test_epistemic_footer_always_appended(self):
-        """EPISTEMIC STANCE block must appear in every prompt."""
+    async def test_epistemic_footer_always_appended(self):
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="anything",
@@ -646,9 +699,11 @@ class TestRouterStream:
             captured.append(gaian_prompt)
             yield "ok"
 
-        with patch("core.synthesizer.stream_synthesis", new=capturing_stream):
-            _run(router.complete(req))
+        fake_synth = types.ModuleType("core.synthesizer")
+        fake_synth.stream_synthesis = capturing_stream
+        sys.modules["core.synthesizer"] = fake_synth
 
+        await router.complete(req)
         assert "EPISTEMIC STANCE" in captured[0]
 
 
@@ -659,7 +714,7 @@ class TestRouterStream:
 class TestGetRouterSingleton:
     def test_returns_same_instance(self):
         import core.inference_router as ir_module
-        ir_module._router_instance = None  # reset for isolation
+        ir_module._router_instance = None
         r1 = get_router()
         r2 = get_router()
         assert r1 is r2
@@ -669,4 +724,4 @@ class TestGetRouterSingleton:
         ir_module._router_instance = None
         r = get_router()
         assert isinstance(r, GAIAInferenceRouter)
-        ir_module._router_instance = None  # clean up
+        ir_module._router_instance = None
