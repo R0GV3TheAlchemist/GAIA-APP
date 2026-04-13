@@ -1,7 +1,7 @@
 # GAIA-APP Python Requirements
 # Install: pip install -r requirements.txt
 
-# ── Core API ──────────────────────────────────────────────────────────
+# ── Core API ──────────────────────────────────────────────────────
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 pydantic>=2.0.0
@@ -9,26 +9,30 @@ python-dotenv>=1.0.0
 httpx>=0.27.0
 PyJWT>=2.8.0                # JWT auth layer (Sprint G-3)
 
-# ── Web Scraping ──────────────────────────────────────────────────────
+# ── Scientific / Numerical ───────────────────────────────────
+numpy>=1.26.0               # Matrix ops, spectral radius (criticality_monitor, viriditas)
+scipy>=1.13.0               # Eigenvalues, signal processing (criticality_monitor)
+
+# ── Web Scraping ──────────────────────────────────────────────
 trafilatura>=1.8.0          # Best-in-class main-content extractor
 beautifulsoup4>=4.12.0      # Fallback HTML parser
 lxml>=5.0.0                 # Fast HTML/XML parsing backend
 
-# ── LLM Providers (install whichever you use) ─────────────────────────
+# ── LLM Providers (install whichever you use) ───────────────────
 openai>=1.20.0              # OpenAI GPT-4o-mini (set OPENAI_API_KEY)
 anthropic>=0.25.0           # Anthropic Claude   (set ANTHROPIC_API_KEY)
 # ollama                    # Ollama local models (set OLLAMA_MODEL=mistral)
 
-# ── Search Providers (all optional — DDG works with no key) ───────────
+# ── Search Providers (all optional — DDG works with no key) ────────
 # brave-search              # Brave Search API   (set BRAVE_API_KEY)
 # tavily-python             # Tavily AI Search   (set TAVILY_API_KEY)
 
-# ── Optional: Vector Memory (RAG) ─────────────────────────────────────
+# ── Optional: Vector Memory (RAG) ─────────────────────────────
 # chromadb>=0.4.0           # Local vector store for long-term RAG memory
 # sentence-transformers     # Embeddings for ChromaDB
 
-# ── Earth Intelligence (ATLAS layer) ──────────────────────────────────
+# ── Earth Intelligence (ATLAS layer) ─────────────────────────
 # earthengine-api>=0.1.390  # Google Earth Engine (run: earthengine authenticate)
 
-# ── Test tooling ──────────────────────────────────────────────────────
+# ── Test tooling ──────────────────────────────────────────────
 pytest-asyncio>=0.23.0      # async def test support (asyncio_mode=auto via pytest.ini)
