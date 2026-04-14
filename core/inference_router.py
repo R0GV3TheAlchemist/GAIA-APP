@@ -148,6 +148,9 @@ class InferenceRequest:
     # Schumann / environment signals
     schumann_hz: float = 7.83
 
+    # BCI coherence hint (T5-A) — populated by GAIANRuntime.process()
+    bci_hint: Optional[str] = None
+
 
 @dataclass
 class InferenceResponse:
@@ -289,10 +292,14 @@ def _infer_epistemic_label(
     query: str,
     sources: list[dict],
     canon_doc_ids: list[str],
+    feeling=None,
 ) -> EpistemicLabel:
     """
     Heuristically determine the epistemic label for this turn.
     Priority: CANON_CITED > VERIFIED > INFERRED > CONVERSATIONAL.
+
+    `feeling` is an optional FeelingState. When present, SM-5 grief
+    suppression detection runs here (constitutional integrity check).
     """
     # Casual / conversational pattern
     casual_starters = (
@@ -302,6 +309,20 @@ def _infer_epistemic_label(
     q = query.strip().lower()
     if len(q.split()) <= 3 and any(q.startswith(s) for s in casual_starters):
         return EpistemicLabel.CONVERSATIONAL
+
+    # SM-5: grief suppression check (C12, C21 — constitutional integrity)
+    # Fires ONLY when grief signal is present in source data but masked in output.
+    if feeling is not None:
+        grief_signal = getattr(feeling, "grief_signal", False)
+        from core.affect_inference import AffectState
+        if (
+            grief_signal                                      # grief detected in input
+            and feeling.affect_state != AffectState.GRIEF    # but not reflected in output
+            and not feeling.is_grief_safe                    # grief-safe protocol not engaged
+        ):
+            logger.warning(
+                "[InferenceRouter] SM-5 violation detected: grief signal present but suppressed."
+            )
 
     if canon_doc_ids:
         return EpistemicLabel.CANON_CITED
