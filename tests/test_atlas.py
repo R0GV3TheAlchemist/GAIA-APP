@@ -13,7 +13,6 @@ Covers:
 
 import math
 import time
-import types
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -36,29 +35,48 @@ from core.atlas import (
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helper: build a fake requests module whose .get raises on demand
+# Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _make_requests_mock(side_effect=None, json_data=None):
-    """Return a fake 'requests' module-like object.
+def _inject_requests(side_effect=None, json_data=None):
+    """Context manager: inject a fake 'requests' module onto core.atlas.
 
-    This is necessary because core/atlas.py imports requests inside a
-    try/except block.  When the package is not installed (CI environment),
-    'requests' is never bound as a module attribute, so
-    patch("core.atlas.requests.get") raises AttributeError.
+    Neither patch() nor patch.object() can create a new attribute on a module
+    when it does not already exist (Python 3.11 behaviour, requests not installed
+    in CI).  We therefore use setattr/delattr directly with try/finally cleanup.
 
-    We work around this by injecting a MagicMock directly onto the module
-    via patch.object(atlas_module, 'requests', fake), which always works
-    regardless of whether the real requests package is installed.
+    Usage::
+
+        with _inject_requests(side_effect=Exception("boom")):
+            kp = reader.fetch_kp()
     """
-    fake_requests = MagicMock()
-    if side_effect is not None:
-        fake_requests.get.side_effect = side_effect
-    elif json_data is not None:
-        mock_response = MagicMock()
-        mock_response.json.return_value = json_data
-        fake_requests.get.return_value = mock_response
-    return fake_requests
+    import contextlib
+
+    @contextlib.contextmanager
+    def _ctx():
+        fake = MagicMock()
+        if side_effect is not None:
+            fake.get.side_effect = side_effect
+        elif json_data is not None:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = json_data
+            fake.get.return_value = mock_resp
+
+        had_attr = hasattr(atlas_module, "requests")
+        original = getattr(atlas_module, "requests", None)
+        setattr(atlas_module, "requests", fake)
+        try:
+            yield fake
+        finally:
+            if had_attr:
+                setattr(atlas_module, "requests", original)
+            else:
+                try:
+                    delattr(atlas_module, "requests")
+                except AttributeError:
+                    pass
+
+    return _ctx()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,16 +171,16 @@ class TestGeomagneticReader:
             assert bz == GeomagneticReader._DEFAULT_BZ
 
     def test_kp_fallback_on_network_error(self):
-        """When requests is available but the network call fails, return default Kp.
+        """When requests is 'available' but the network call raises, return default Kp.
 
-        Strategy: inject a fake 'requests' object directly onto the atlas module
-        so the attribute is guaranteed to exist even when requests is not installed
-        in the test environment.  This is the only approach that works whether or
-        not the real requests package is present.
+        Root cause: atlas.py imports requests inside try/except, so when the
+        package is absent from the CI environment the name is never bound on
+        the module object.  patch() and patch.object() both require the
+        attribute to pre-exist.  We therefore use setattr/delattr directly
+        (via _inject_requests) which works whether or not requests is installed.
         """
-        fake_requests = _make_requests_mock(side_effect=Exception("Network error"))
         with patch("core.atlas._REQUESTS_AVAILABLE", True):
-            with patch.object(atlas_module, "requests", fake_requests):
+            with _inject_requests(side_effect=Exception("Network error")):
                 kp = self.reader.fetch_kp()
                 assert kp == GeomagneticReader._DEFAULT_KP
 
