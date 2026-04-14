@@ -13,8 +13,11 @@ Covers:
 
 import math
 import time
+import types
 import pytest
 from unittest.mock import patch, MagicMock
+
+import core.atlas as atlas_module
 
 from core.atlas import (
     SchumannReader,
@@ -30,6 +33,32 @@ from core.atlas import (
     KP_MINOR_STORM,
     KP_MAJOR_STORM,
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper: build a fake requests module whose .get raises on demand
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_requests_mock(side_effect=None, json_data=None):
+    """Return a fake 'requests' module-like object.
+
+    This is necessary because core/atlas.py imports requests inside a
+    try/except block.  When the package is not installed (CI environment),
+    'requests' is never bound as a module attribute, so
+    patch("core.atlas.requests.get") raises AttributeError.
+
+    We work around this by injecting a MagicMock directly onto the module
+    via patch.object(atlas_module, 'requests', fake), which always works
+    regardless of whether the real requests package is installed.
+    """
+    fake_requests = MagicMock()
+    if side_effect is not None:
+        fake_requests.get.side_effect = side_effect
+    elif json_data is not None:
+        mock_response = MagicMock()
+        mock_response.json.return_value = json_data
+        fake_requests.get.return_value = mock_response
+    return fake_requests
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,13 +155,14 @@ class TestGeomagneticReader:
     def test_kp_fallback_on_network_error(self):
         """When requests is available but the network call fails, return default Kp.
 
-        Fix: patch the 'requests' name as it is bound *inside* core.atlas
-        (i.e. core.atlas.requests.get), not the top-level requests module.
-        The CI runner may not have requests installed, so patching the
-        module-level name in core.atlas is the correct approach regardless.
+        Strategy: inject a fake 'requests' object directly onto the atlas module
+        so the attribute is guaranteed to exist even when requests is not installed
+        in the test environment.  This is the only approach that works whether or
+        not the real requests package is present.
         """
+        fake_requests = _make_requests_mock(side_effect=Exception("Network error"))
         with patch("core.atlas._REQUESTS_AVAILABLE", True):
-            with patch("core.atlas.requests.get", side_effect=Exception("Network error")):
+            with patch.object(atlas_module, "requests", fake_requests):
                 kp = self.reader.fetch_kp()
                 assert kp == GeomagneticReader._DEFAULT_KP
 
