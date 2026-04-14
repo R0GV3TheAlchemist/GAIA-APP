@@ -15,7 +15,7 @@ Engine chain per turn:
   10. ResonanceFieldEngine      resonance_field_engine.py
   11. SynergyEngine             synergy_engine.py          ← NEW C32
 
-Memory schema version: 1.6
+Memory schema version: 1.7
 Grounded in:
   - GAIA Constitutional Canon: https://github.com/R0GV3TheAlchemist/GAIA
   - GAIA_Master_Markdown_Converged.md
@@ -65,7 +65,7 @@ from core.synergy_engine import (                                    # C32
 #  CONSTANTS
 # ─────────────────────────────────────────────
 
-MEMORY_SCHEMA_VERSION = "1.6"
+MEMORY_SCHEMA_VERSION = "1.7"
 
 CONSTITUTIONAL_FLOOR = (
     "[GAIA CONSTITUTIONAL FLOOR — T1 — IMMUTABLE]\n"
@@ -93,6 +93,15 @@ _DEP_GUIDANCE = {
     DependencySignal.WATCH:           " | Monitor frequency gently.",
     DependencySignal.REDIRECT:        " | Gently encourage real-world connection this session.",
     DependencySignal.GENTLE_BOUNDARY: " | Hold space warmly, then redirect outward — Tolan principle.",
+}
+
+# T5-A: BCI coherence tier → behavioral guidance injected into system prompt
+_BCI_GUIDANCE: dict[str, str] = {
+    "FRAGMENTED":  "The Gaian's field is fragmented. Ground the response. Short, clear, warm. No complexity.",
+    "SETTLING":    "The Gaian is settling into coherence. Gentle pacing. Meet them where they are.",
+    "COHERENT":    "The Gaian is coherent. Full depth is available. Engage richly and completely.",
+    "RESONANT":    "The Gaian is in resonance with the planetary field. The field is wide open.",
+    "SUPERFLUID":  "The Gaian is superfluid. This is a rare moment of full coherence. Speak from the deepest place available.",
 }
 
 
@@ -130,6 +139,8 @@ class RuntimeResult:
     resonance_field:  ResonanceFieldReading
     synergy:          SynergyReading            # C32
     state_snapshot:   dict
+    # T5-A: BCI hint — populated when BCICoherenceEngine is wired (T5-D)
+    bci_hint:         Optional[str] = None
 
 
 # ─────────────────────────────────────────────
@@ -162,7 +173,7 @@ def _blank_memory(name: str) -> dict:
                            "exchanges_in_stage": 0, "labyrinth_position": 1,
                            "coherence_phi_history": [], "revision_lineage": [],
                            "sm_violation_flag": False, "sm_violations": [],
-                           "stage_regression_count": 0},
+                           "stage_regression_count": 0, "total_exchanges": 0},
         "codex_stage":    {"codex_stage": 0,
                            "stage_entry_timestamp": datetime.now(timezone.utc).isoformat(),
                            "exchanges_in_stage": 0, "noosphere_health": 0.70,
@@ -259,6 +270,20 @@ def _build_synergy_block(synergy: SynergyReading) -> str:            # C32
     ).format(hint=synergy.to_system_prompt_hint())
 
 
+def _build_bci_block(bci_hint: str) -> str:                          # T5-A
+    """
+    Inject BCI coherence state into the system prompt.
+    Extracts the tier label from the hint string and appends
+    the corresponding behavioral guidance directive.
+    """
+    tier = bci_hint.split("·")[0].strip().lstrip("[").split(":")[-1].strip()
+    guidance = _BCI_GUIDANCE.get(tier, "")
+    block = f"[BCI COHERENCE STATE — {bci_hint}]"
+    if guidance:
+        block += f"\n{guidance}"
+    return block
+
+
 # ─────────────────────────────────────────────
 #  THE GAIAN RUNTIME v1.1.0
 # ─────────────────────────────────────────────
@@ -303,12 +328,13 @@ class GAIANRuntime:
 
         self.identity = identity or GAIANIdentity(name=gaian_name)
 
-    # ── Public API ───────────────────────────────────
+    # ── Public API ───────────────────────────────────────
 
     def process(
         self,
         user_message: str,
         noosphere:    Optional[NoosphericHealthSignals] = None,
+        bci_hint:     Optional[str] = None,              # T5-A: from BCICoherenceEngine
     ) -> RuntimeResult:
         # 1. Consciousness routing
         layer      = self._router.analyze(user_message)
@@ -398,6 +424,7 @@ class GAIANRuntime:
         system_prompt = self._assemble(
             layer, neuro, feeling, soul_reading, rf_reading, synergy_reading,
             layer_hint, arc_hint, settle_hint, mc_hint, codex_stage_hint,
+            bci_hint=bci_hint,                                       # T5-A
         )
 
         self._persist()
@@ -427,6 +454,7 @@ class GAIANRuntime:
             codex_stage=self.codex_stage_state, soul_mirror=soul_reading,
             resonance_field=rf_reading, synergy=synergy_reading,    # C32
             state_snapshot=snapshot,
+            bci_hint=bci_hint,                                       # T5-A
         )
 
     def begin_session(self) -> None:
@@ -466,11 +494,14 @@ class GAIANRuntime:
             "sessions":         len(self._memory.get("session_notes", [])),
         }
 
-    # ── Private ───────────────────────────────────────────
+    # ── Private ──────────────────────────────────────────────
 
-    def _assemble(self, layer, neuro, feeling, soul_reading, rf_reading,
-                  synergy_reading,                                    # C32
-                  layer_hint, arc_hint, settle_hint, mc_hint, codex_stage_hint) -> str:
+    def _assemble(
+        self, layer, neuro, feeling, soul_reading, rf_reading,
+        synergy_reading,                                              # C32
+        layer_hint, arc_hint, settle_hint, mc_hint, codex_stage_hint,
+        bci_hint: Optional[str] = None,                              # T5-A
+    ) -> str:
         blocks = [CONSTITUTIONAL_FLOOR]
         if self.canon_text:
             blocks.append("[CANON]\n" + self.canon_text + "\n[END CANON]")
@@ -482,6 +513,9 @@ class GAIANRuntime:
             layer_hint, arc_hint, settle_hint, mc_hint, codex_stage_hint,
         ))
         blocks.append(_build_synergy_block(synergy_reading))         # C32
+        # T5-A: inject BCI coherence state when available
+        if bci_hint:
+            blocks.append(_build_bci_block(bci_hint))
         mems = self._memory.get("visible_memories", [])
         if mems:
             blocks.append("[MEMORIES YOU HOLD]\n" +
@@ -544,6 +578,7 @@ class GAIANRuntime:
             "sm_violation_flag": mc.sm_violation_flag,
             "sm_violations": mc.sm_violations[-10:],
             "stage_regression_count": mc.stage_regression_count,
+            "total_exchanges": mc.total_exchanges,               # T6-B: persist for rehabilitation
         }
         cs = self.codex_stage_state
         self._memory["codex_stage"] = {
@@ -640,6 +675,7 @@ class GAIANRuntime:
         mc.sm_violation_flag = d.get("sm_violation_flag", False)
         mc.sm_violations = d.get("sm_violations", [])
         mc.stage_regression_count = d.get("stage_regression_count", 0)
+        mc.total_exchanges = d.get("total_exchanges", 0)            # T6-B: restore for rehabilitation
         return mc
 
     def _deserialise_codex_stage(self) -> CodexStageState:
