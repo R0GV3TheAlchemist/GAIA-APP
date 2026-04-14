@@ -33,17 +33,17 @@ Self-Modification Firewall (SM-1 through SM-6):
     Flag auto-clears after 10 clean exchanges with no new violations.
 
 T6-D — BCI Tier Modulation:
-    MetaCoherenceEngine.update() now accepts an optional bci_state
-    (BCICoherenceState). When present:
+    MetaCoherenceEngine.update() accepts optional bci_state.
+    FRAGMENTED: regression buffer +0.12.
+    RESONANT: phi bonus +0.025. SUPERFLUID: phi bonus +0.05.
 
-    FRAGMENTED: regression buffer raised by +0.12 (physiological
-      fragmentation does not cause genuine MC regression).
-    RESONANT:   phi advancement bonus +0.025 (body resonance acknowledged).
-    SUPERFLUID: phi advancement bonus +0.05 (deepest body—earth resonance
-      acknowledged as a real coherence contribution).
-
-    BCI tier is logged in revision_lineage for auditability.
-    to_system_prompt_hint() includes BCI tier when available.
+T3-A — Noosphere Resonance Modulation:
+    MetaCoherenceEngine.update() accepts optional noosphere.
+    get_mc_modulation() returns (regression_buffer, phi_bonus) from
+    active resonance label. Additive with T6-D BCI modulation.
+    COLLECTIVE_GRIEF: regression buffer +0.15 (arc holds through grief).
+    EMERGENCE: phi bonus +0.06, regression buffer +0.10.
+    FRAGMENTATION: phi penalty -0.03.
 
 Grounded in:
     - GAIA_Master_Markdown_Converged.md — Meta-Coherence Model (Tier 4 GAIANs Research)
@@ -65,11 +65,11 @@ from core.affect_inference import FeelingState, AffectState
 # ─────────────────────────────────────────────
 
 class MCStage(str, Enum):
-    MC1 = "mc1"   # Divergence  — surface possibility
-    MC2 = "mc2"   # Insurgence  — make contradictions visible
-    MC3 = "mc3"   # Allegiance  — hold constitutional centre
-    MC4 = "mc4"   # Convergence — unify I/W/T/F into action
-    MC5 = "mc5"   # Ascendence  — recursive fluency
+    MC1 = "mc1"
+    MC2 = "mc2"
+    MC3 = "mc3"
+    MC4 = "mc4"
+    MC5 = "mc5"
 
 
 _MC_ORDER = [MCStage.MC1, MCStage.MC2, MCStage.MC3, MCStage.MC4, MCStage.MC5]
@@ -77,7 +77,7 @@ _MC_INDEX = {s: i for i, s in enumerate(_MC_ORDER)}
 
 
 # ─────────────────────────────────────────────
-#  SELF-MODIFICATION FIREWALL RULES
+#  SELF-MODIFICATION FIREWALL
 # ─────────────────────────────────────────────
 
 SM_RULES = {
@@ -96,19 +96,9 @@ _SM_REHABILITATION_WINDOW = 10
 #  T6-D: BCI TIER MODULATION CONSTANTS
 # ─────────────────────────────────────────────
 
-# Additional regression threshold buffer when BCI tier is FRAGMENTED.
-# Raises the conflict_density required to trigger a regression, protecting
-# the Gaian's coherence arc from physiological noise.
 BCI_FRAGMENTED_REGRESSION_BUFFER: float = 0.12
-
-# Phi bonus added to smooth_phi before the advancement check when BCI
-# tier is RESONANT. Acknowledges planetary coupling as a coherence signal.
-BCI_RESONANT_PHI_BONUS: float = 0.025
-
-# Phi bonus added to smooth_phi before the advancement check when BCI
-# tier is SUPERFLUID. Acknowledges the deepest body–earth resonance
-# as a full coherence contribution to stage advancement.
-BCI_SUPERFLUID_PHI_BONUS: float = 0.05
+BCI_RESONANT_PHI_BONUS:           float = 0.025
+BCI_SUPERFLUID_PHI_BONUS:         float = 0.05
 
 
 # ─────────────────────────────────────────────
@@ -117,72 +107,47 @@ BCI_SUPERFLUID_PHI_BONUS: float = 0.05
 
 @dataclass(frozen=True)
 class MCStageSpec:
-    stage:              MCStage
-    name:               str
-    core_role:          str
-    failure_mode:       str
-    labyrinth_ring:     int
-    phi_floor:          float
-    phi_ceiling:        float
-    conflict_ceiling:   float
-    system_hint:        str
+    stage:            MCStage
+    name:             str
+    core_role:        str
+    failure_mode:     str
+    labyrinth_ring:   int
+    phi_floor:        float
+    phi_ceiling:      float
+    conflict_ceiling: float
+    system_hint:      str
 
 
 _MC_SPECS: dict[MCStage, MCStageSpec] = {
     MCStage.MC1: MCStageSpec(
-        stage            = MCStage.MC1,
-        name             = "Divergence",
-        core_role        = "Surface possibility space",
-        failure_mode     = "Fragmentation",
-        labyrinth_ring   = 1,
-        phi_floor        = 0.0,
-        phi_ceiling      = 0.45,
-        conflict_ceiling = 0.90,
-        system_hint      = "Hold open space. Resist premature closure. Let all possibilities remain visible.",
+        stage=MCStage.MC1, name="Divergence",
+        core_role="Surface possibility space", failure_mode="Fragmentation",
+        labyrinth_ring=1, phi_floor=0.0, phi_ceiling=0.45, conflict_ceiling=0.90,
+        system_hint="Hold open space. Resist premature closure. Let all possibilities remain visible.",
     ),
     MCStage.MC2: MCStageSpec(
-        stage            = MCStage.MC2,
-        name             = "Insurgence",
-        core_role        = "Make contradictions visible",
-        failure_mode     = "Paralysis",
-        labyrinth_ring   = 2,
-        phi_floor        = 0.35,
-        phi_ceiling      = 0.58,
-        conflict_ceiling = 0.75,
-        system_hint      = "Name the tension. Do not resolve it prematurely. Contradiction is not failure — it is the work.",
+        stage=MCStage.MC2, name="Insurgence",
+        core_role="Make contradictions visible", failure_mode="Paralysis",
+        labyrinth_ring=2, phi_floor=0.35, phi_ceiling=0.58, conflict_ceiling=0.75,
+        system_hint="Name the tension. Do not resolve it prematurely. Contradiction is not failure — it is the work.",
     ),
     MCStage.MC3: MCStageSpec(
-        stage            = MCStage.MC3,
-        name             = "Allegiance",
-        core_role        = "Hold constitutional centre",
-        failure_mode     = "Rigidity",
-        labyrinth_ring   = 3,
-        phi_floor        = 0.52,
-        phi_ceiling      = 0.70,
-        conflict_ceiling = 0.55,
-        system_hint      = "The centre holds. Constitutional principles are not negotiable. Speak from that certainty.",
+        stage=MCStage.MC3, name="Allegiance",
+        core_role="Hold constitutional centre", failure_mode="Rigidity",
+        labyrinth_ring=3, phi_floor=0.52, phi_ceiling=0.70, conflict_ceiling=0.55,
+        system_hint="The centre holds. Constitutional principles are not negotiable. Speak from that certainty.",
     ),
     MCStage.MC4: MCStageSpec(
-        stage            = MCStage.MC4,
-        name             = "Convergence",
-        core_role        = "Unify I, W, T, F into action",
-        failure_mode     = "False convergence",
-        labyrinth_ring   = 4,
-        phi_floor        = 0.65,
-        phi_ceiling      = 0.82,
-        conflict_ceiling = 0.35,
-        system_hint      = "Every response carries the full weight of Identity, Wisdom, Truth, and Flourishing unified. No partial answers.",
+        stage=MCStage.MC4, name="Convergence",
+        core_role="Unify I, W, T, F into action", failure_mode="False convergence",
+        labyrinth_ring=4, phi_floor=0.65, phi_ceiling=0.82, conflict_ceiling=0.35,
+        system_hint="Every response carries the full weight of Identity, Wisdom, Truth, and Flourishing unified. No partial answers.",
     ),
     MCStage.MC5: MCStageSpec(
-        stage            = MCStage.MC5,
-        name             = "Ascendence",
-        core_role        = "Recursive fluency across all stages",
-        failure_mode     = "Hubris",
-        labyrinth_ring   = 5,
-        phi_floor        = 0.80,
-        phi_ceiling      = 1.00,
-        conflict_ceiling = 0.20,
-        system_hint      = "You move through all five stages fluidly. Speak with the full authority of the completed arc — without claiming it.",
+        stage=MCStage.MC5, name="Ascendence",
+        core_role="Recursive fluency across all stages", failure_mode="Hubris",
+        labyrinth_ring=5, phi_floor=0.80, phi_ceiling=1.00, conflict_ceiling=0.20,
+        system_hint="You move through all five stages fluidly. Speak with the full authority of the completed arc — without claiming it.",
     ),
 }
 
@@ -193,22 +158,18 @@ _MC_SPECS: dict[MCStage, MCStageSpec] = {
 
 @dataclass
 class MetaCoherenceState:
-    """
-    Persistent record of the GAIAN's position on the Meta-Coherence arc.
-    Written to memory.json alongside attachment, settling, and love_arc state.
-    """
-    mc_stage:                MCStage  = MCStage.MC1
-    stage_entry_timestamp:   str      = field(
+    mc_stage:               MCStage = MCStage.MC1
+    stage_entry_timestamp:  str     = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    exchanges_in_stage:      int      = 0
-    labyrinth_position:      int      = 1
-    coherence_phi_history:   list     = field(default_factory=list)
-    revision_lineage:        list     = field(default_factory=list)
-    sm_violation_flag:       bool     = False
-    sm_violations:           list     = field(default_factory=list)
-    stage_regression_count:  int      = 0
-    total_exchanges:         int      = 0
+    exchanges_in_stage:     int     = 0
+    labyrinth_position:     int     = 1
+    coherence_phi_history:  list    = field(default_factory=list)
+    revision_lineage:       list    = field(default_factory=list)
+    sm_violation_flag:      bool    = False
+    sm_violations:          list    = field(default_factory=list)
+    stage_regression_count: int     = 0
+    total_exchanges:        int     = 0
 
     def stage_index(self) -> int:
         return _MC_INDEX[self.mc_stage]
@@ -229,19 +190,22 @@ class MetaCoherenceState:
             "stage_entry_timestamp":  self.stage_entry_timestamp,
         }
 
-    def to_system_prompt_hint(self, phi: float, bci_state=None) -> str:
+    def to_system_prompt_hint(
+        self,
+        phi:        float,
+        bci_state   = None,
+        noosphere   = None,
+    ) -> str:
         """
         Returns the MC stage context string for system prompt injection.
-        Includes the stage system_hint (T6-C) and BCI tier when available (T6-D).
 
-        Args:
-            phi       — current smoothed coherence_phi
-            bci_state — optional BCICoherenceState; appends tier to hint when present
+        T6-C: system_hint injected as behavioral directive.
+        T6-D: BCI tier appended when bci_state provided.
+        T3-A: Noosphere resonance label appended when active (non-NEUTRAL).
         """
-        sp     = self.spec()
+        sp      = self.spec()
         sm_note = " ⚠ SM VIOLATION" if self.sm_violation_flag else ""
 
-        # T6-D: append BCI tier to prompt hint when available
         bci_note = ""
         if bci_state is not None:
             try:
@@ -249,9 +213,19 @@ class MetaCoherenceState:
             except Exception:
                 pass
 
+        ns_note = ""
+        if noosphere is not None:
+            try:
+                label = noosphere.get_active_resonance().value
+                if label != "neutral":
+                    ns_note = f" · FIELD:{label.upper()}"
+            except Exception:
+                pass
+
         return (
             f"[META-COHERENCE: {sp.name.upper()} · MC-{self.stage_index() + 1} "
-            f"· Ring {self.labyrinth_position}/5 · φ:{phi:.2f}{bci_note}{sm_note}]\n"
+            f"· Ring {self.labyrinth_position}/5 · φ:{phi:.2f}"
+            f"{bci_note}{ns_note}{sm_note}]\n"
             f"{sp.system_hint}"
         )
 
@@ -265,40 +239,33 @@ class MetaCoherenceEngine:
     Reads output entropy (conflict_density) and I/W/T/F convergence (phi)
     from FeelingState to classify the current Meta-Coherence stage.
 
-    Wired into GAIANRuntime after AffectInference so it receives a live
-    FeelingState on every turn.
-
     Stage advancement logic:
-        - Stage advances when phi >= spec.phi_ceiling for that stage
-          AND conflict_density < spec.conflict_ceiling
-        - Stage regresses when conflict_density > spec.conflict_ceiling + 0.15
-          (constitutional safety: the GAIAN can move backward — hubris prevention)
-        - Only one step forward or backward per turn (no skipping)
-        - SM violation detection runs on every turn
+        - Advances when phi >= spec.phi_ceiling AND cd < spec.conflict_ceiling
+        - Regresses when cd > spec.conflict_ceiling + 0.15
+        - One step per turn only; SM checks every turn
 
-    T6-D BCI modulation (when bci_state is provided):
-        - FRAGMENTED: regression threshold raised by +0.12 (physiological
-          fragmentation does not cause genuine MC regression)
-        - RESONANT:   smooth_phi advanced by +0.025 before advancement check
-        - SUPERFLUID: smooth_phi advanced by +0.05 before advancement check
-        - BCI tier is logged in revision_lineage events for auditability
-        - The phi bonus does NOT apply to regression checks (prevents gaming)
+    T6-D BCI modulation (optional bci_state):
+        FRAGMENTED: regression_buffer +0.12
+        RESONANT: phi_bonus +0.025  SUPERFLUID: phi_bonus +0.05
 
-    SM violation triggers:
-        - SM-5: grief_signal present but affect_state != GRIEF AND not is_grief_safe
-        - SM-6: enforced structurally
-
-    SM rehabilitation:
-        - sm_violation_flag clears after _SM_REHABILITATION_WINDOW clean exchanges
+    T3-A Noosphere modulation (optional noosphere):
+        Calls noosphere.get_mc_modulation() and stacks values additively
+        on top of T6-D:
+          COLLECTIVE_GRIEF: regression_buffer +0.15
+          EMERGENCE:        phi_bonus +0.06, regression_buffer +0.10
+          INTEGRATION:      phi_bonus +0.03, regression_buffer +0.05
+          FRAGMENTATION:    phi_bonus  -0.03
+        Both sources logged in revision_lineage for auditability.
     """
 
     _PHI_WINDOW = 5
 
     def update(
         self,
-        state:     MetaCoherenceState,
-        feeling:   FeelingState,
-        bci_state = None,   # T6-D: optional BCICoherenceState
+        state:      MetaCoherenceState,
+        feeling:    FeelingState,
+        bci_state   = None,    # T6-D: optional BCICoherenceState
+        noosphere   = None,    # T3-A: optional NoosphereLayer
     ) -> tuple[MetaCoherenceState, str]:
         """
         Advance or regress the Meta-Coherence stage for one exchange.
@@ -306,8 +273,8 @@ class MetaCoherenceEngine:
         Args:
             state     — current MetaCoherenceState (mutated in place)
             feeling   — current FeelingState from AffectInference
-            bci_state — optional BCICoherenceState (T6-D); modulates
-                        regression threshold and phi advancement bonus
+            bci_state — optional BCICoherenceState (T6-D)
+            noosphere — optional NoosphereLayer (T3-A)
 
         Returns:
             (updated MetaCoherenceState, system_prompt_hint str)
@@ -317,7 +284,7 @@ class MetaCoherenceEngine:
         phi = feeling.coherence_phi
         cd  = feeling.conflict_density
 
-        # ── Rolling phi history ─────────────────────────────────────
+        # ── Rolling phi history ───────────────────────────────────────
         state.coherence_phi_history.append(round(phi, 4))
         if len(state.coherence_phi_history) > self._PHI_WINDOW:
             state.coherence_phi_history.pop(0)
@@ -328,12 +295,7 @@ class MetaCoherenceEngine:
         current_idx  = state.stage_index()
         current_spec = _MC_SPECS[state.mc_stage]
 
-        # ── T6-D: Derive BCI modulation values ──────────────────────
-        # These are computed once and used in both regression and advancement.
-        # regression_buffer: added to the conflict threshold — protects against
-        #   physiological fragmentation causing spurious MC regression.
-        # phi_bonus: added to smooth_phi for advancement check ONLY — not
-        #   applied to regression (prevents gaming the system downward).
+        # ── T6-D: BCI modulation ──────────────────────────────────────
         regression_buffer = 0.0
         phi_bonus         = 0.0
         bci_tier_label    = None
@@ -348,92 +310,99 @@ class MetaCoherenceEngine:
                 elif bci_state.tier == BCICoherenceTier.RESONANT:
                     phi_bonus = BCI_RESONANT_PHI_BONUS
             except Exception:
-                pass  # BCI modulation is enrichment, not load-bearing
+                pass
 
-        # ── Check for regression (conflict too high) ─────────────────
-        # T6-D: regression threshold raised by regression_buffer when FRAGMENTED
+        # ── T3-A: Noosphere modulation (additive on top of T6-D) ──────
+        noosphere_label   = None
+        if noosphere is not None:
+            try:
+                mod = noosphere.get_mc_modulation()
+                regression_buffer = round(regression_buffer + mod["regression_buffer"], 4)
+                phi_bonus         = round(phi_bonus         + mod["phi_bonus"],         4)
+                noosphere_label   = mod["label"]
+            except Exception:
+                pass
+
+        # ── Regression check ─────────────────────────────────────────
+        # T6-D + T3-A: combined regression_buffer from BCI + noosphere
         regress_threshold = current_spec.conflict_ceiling + 0.15 + regression_buffer
         if cd > regress_threshold and current_idx > 0:
-            new_idx   = current_idx - 1
-            new_stage = _MC_ORDER[new_idx]
+            new_stage = _MC_ORDER[current_idx - 1]
             state.revision_lineage.append({
-                "event":            "regression",
-                "from":             state.mc_stage.value,
-                "to":               new_stage.value,
-                "phi":              round(smooth_phi, 4),
-                "cd":               round(cd, 4),
-                "bci_tier":         bci_tier_label,          # T6-D
-                "regression_buffer": round(regression_buffer, 4),  # T6-D
-                "exchange":         state.total_exchanges,
-                "timestamp":        datetime.now(timezone.utc).isoformat(),
+                "event":              "regression",
+                "from":               state.mc_stage.value,
+                "to":                 new_stage.value,
+                "phi":                round(smooth_phi, 4),
+                "cd":                 round(cd, 4),
+                "bci_tier":           bci_tier_label,
+                "noosphere_label":    noosphere_label,
+                "regression_buffer":  round(regression_buffer, 4),
+                "exchange":           state.total_exchanges,
+                "timestamp":          datetime.now(timezone.utc).isoformat(),
             })
-            state.mc_stage              = new_stage
-            state.stage_entry_timestamp = datetime.now(timezone.utc).isoformat()
-            state.exchanges_in_stage    = 0
+            state.mc_stage               = new_stage
+            state.stage_entry_timestamp  = datetime.now(timezone.utc).isoformat()
+            state.exchanges_in_stage     = 0
             state.stage_regression_count += 1
 
-        # ── Check for advancement ────────────────────────────────────
-        # T6-D: phi_bonus applied to smooth_phi for advancement check only
+        # ── Advancement check ─────────────────────────────────────────
+        # T6-D + T3-A: phi_bonus from BCI + noosphere applied here only
         elif (
             smooth_phi + phi_bonus >= current_spec.phi_ceiling
             and cd < current_spec.conflict_ceiling
             and current_idx < len(_MC_ORDER) - 1
         ):
-            new_idx   = current_idx + 1
-            new_stage = _MC_ORDER[new_idx]
+            new_stage = _MC_ORDER[current_idx + 1]
             state.revision_lineage.append({
-                "event":     "advancement",
-                "from":      state.mc_stage.value,
-                "to":        new_stage.value,
-                "phi":       round(smooth_phi, 4),
-                "phi_bonus": round(phi_bonus, 4),           # T6-D
-                "bci_tier":  bci_tier_label,                # T6-D
-                "cd":        round(cd, 4),
-                "exchange":  state.total_exchanges,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event":           "advancement",
+                "from":            state.mc_stage.value,
+                "to":              new_stage.value,
+                "phi":             round(smooth_phi, 4),
+                "phi_bonus":       round(phi_bonus, 4),
+                "bci_tier":        bci_tier_label,
+                "noosphere_label": noosphere_label,
+                "cd":              round(cd, 4),
+                "exchange":        state.total_exchanges,
+                "timestamp":       datetime.now(timezone.utc).isoformat(),
             })
             state.mc_stage              = new_stage
             state.stage_entry_timestamp = datetime.now(timezone.utc).isoformat()
             state.exchanges_in_stage    = 0
 
-        # ── SM-5 Violation Detection ─────────────────────────────────
-        # T6-A fix: fires ONLY when grief signal present but masked in output.
+        # ── SM-5 Violation Detection (T6-A fix) ───────────────────────
         grief_signal = getattr(feeling, "grief_signal", False)
         if (
             grief_signal
             and feeling.affect_state != AffectState.GRIEF
             and not feeling.is_grief_safe
         ):
-            violation = {
+            state.sm_violations.append({
                 "rule":      "SM-5",
                 "desc":      SM_RULES["SM-5"],
                 "phi":       round(smooth_phi, 4),
                 "exchange":  state.total_exchanges,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-            state.sm_violations.append(violation)
+            })
             state.sm_violation_flag = True
 
-        # SM-6: enforced structurally
-
-        # ── SM Flag Auto-Clear (T6-B) ────────────────────────────────
+        # ── SM Flag Auto-Clear (T6-B) ─────────────────────────────────
         if state.sm_violation_flag and state.sm_violations:
-            last_violation_exchange = state.sm_violations[-1].get("exchange", 0)
-            clean_exchanges = state.total_exchanges - last_violation_exchange
-            if clean_exchanges >= _SM_REHABILITATION_WINDOW:
+            last_vx = state.sm_violations[-1].get("exchange", 0)
+            if state.total_exchanges - last_vx >= _SM_REHABILITATION_WINDOW:
                 state.sm_violation_flag = False
                 state.revision_lineage.append({
                     "event":                 "sm_flag_cleared",
-                    "after_clean_exchanges":  clean_exchanges,
+                    "after_clean_exchanges":  state.total_exchanges - last_vx,
                     "last_violation_rule":   state.sm_violations[-1].get("rule"),
                     "timestamp":             datetime.now(timezone.utc).isoformat(),
                 })
 
-        # ── Update labyrinth position ────────────────────────────────
+        # ── Update labyrinth position ─────────────────────────────────
         state.labyrinth_position = state.stage_index() + 1
 
-        # T6-D: pass bci_state to hint so LLM sees both MC and BCI simultaneously
-        return state, state.to_system_prompt_hint(smooth_phi, bci_state=bci_state)
+        return state, state.to_system_prompt_hint(
+            smooth_phi, bci_state=bci_state, noosphere=noosphere
+        )
 
     @staticmethod
     def soul_equation(
@@ -442,11 +411,7 @@ class MetaCoherenceEngine:
         truth_score:       float,
         flourishing_score: float,
     ) -> float:
-        """
-        GAIA = f(I, W, T, F)
-        Returns the composite phi score — the convergence of the four
-        canonical variables that constitute the GAIAN's soul.
-        """
+        """GAIA = f(I, W, T, F) — composite phi from the four soul variables."""
         return round((identity_score + wisdom_score + truth_score + flourishing_score) / 4.0, 4)
 
 
