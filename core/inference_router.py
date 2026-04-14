@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -52,7 +53,6 @@ class EpistemicLabel(str, Enum):
 
 
 # T4-C: Label-specific behavioral footers — one per epistemic tier.
-# These are injected into the system prompt and directly shape GAIA's voice.
 _EPISTEMIC_FOOTERS: dict[EpistemicLabel, str] = {
     EpistemicLabel.CANON_CITED: (
         "[EPISTEMIC STANCE — CANON CITED — C12]\n"
@@ -86,6 +86,31 @@ _EPISTEMIC_FOOTERS: dict[EpistemicLabel, str] = {
 }
 
 
+# T4-D: Speculative query patterns.
+# Compiled once at import time for performance.
+# Covers hypothetical, counterfactual, future-predictive, and open
+# philosophical framings that should trigger SPECULATIVE labeling.
+_SPECULATIVE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\bwhat if\b",             re.IGNORECASE),
+    re.compile(r"\bimagine (if|that)\b",    re.IGNORECASE),
+    re.compile(r"\bsuppose\b",             re.IGNORECASE),
+    re.compile(r"\bhypothetically\b",       re.IGNORECASE),
+    re.compile(r"\bcould .{0,40} ever\b",   re.IGNORECASE),
+    re.compile(r"\bwill .{0,30} happen\b",  re.IGNORECASE),
+    re.compile(r"\bdo you think .{0,40}\?", re.IGNORECASE),
+    re.compile(r"\bis it possible\b",       re.IGNORECASE),
+    re.compile(r"\bwhat would happen\b",    re.IGNORECASE),
+    re.compile(r"\bwhat would .{0,30} have\b", re.IGNORECASE),
+    re.compile(r"\bhad .{0,30} not\b",     re.IGNORECASE),
+    re.compile(r"\bif .{0,40} were to\b",  re.IGNORECASE),
+]
+
+
+def _is_speculative_query(query: str) -> bool:
+    """Returns True when the query matches any speculative pattern."""
+    return any(p.search(query) for p in _SPECULATIVE_PATTERNS)
+
+
 # ------------------------------------------------------------------ #
 #  Backend Registry                                                    #
 # ------------------------------------------------------------------ #
@@ -101,18 +126,14 @@ _BACKEND_HEALTH: dict[InferenceBackend, bool] = {
     InferenceBackend.OPENAI:    True,
     InferenceBackend.ANTHROPIC: True,
     InferenceBackend.OLLAMA:    True,
-    InferenceBackend.FALLBACK:  True,  # always healthy
+    InferenceBackend.FALLBACK:  True,
 }
 
 _BACKEND_FAILURE_TS: dict[InferenceBackend, float] = {}
-_BACKEND_RECOVERY_WINDOW = 120.0  # seconds before re-probing a failed backend
+_BACKEND_RECOVERY_WINDOW = 120.0
 
 
 def _probe_backend_availability() -> InferenceBackend:
-    """
-    Walk the priority chain and return the first healthy backend.
-    Respects a 120-second cool-down on recently failed backends.
-    """
     now = time.monotonic()
     chain = [
         InferenceBackend.OPENAI,
@@ -153,55 +174,45 @@ def _mark_backend_failed(backend: InferenceBackend) -> None:
 
 @dataclass
 class InferenceRequest:
-    """
-    Everything the router needs to produce a GAIA-constituted response.
-    Callers (server.py endpoints) build this and pass it to the router.
-    """
     query: str
 
-    # Gaian context
-    gaian_slug: Optional[str] = None
-    gaian_system_prompt: Optional[str] = None
-    long_term_memories: list[str] = field(default_factory=list)
-    visible_memories: list[str] = field(default_factory=list)
-    conversation_history: list[dict] = field(default_factory=list)
-    conversation_context: Optional[str] = None
+    gaian_slug:           Optional[str]  = None
+    gaian_system_prompt:  Optional[str]  = None
+    long_term_memories:   list[str]      = field(default_factory=list)
+    visible_memories:     list[str]      = field(default_factory=list)
+    conversation_history: list[dict]     = field(default_factory=list)
+    conversation_context: Optional[str]  = None
+    sources:              list[dict]     = field(default_factory=list)
 
-    # Sources already gathered upstream
-    sources: list[dict] = field(default_factory=list)
+    enrich_canon:         bool           = True
+    canon_max_results:    int            = 3
+    enrich_noosphere:     bool           = True
+    enrich_criticality:   bool           = True
 
-    # Enrichment flags
-    enrich_canon: bool = True
-    canon_max_results: int = 3
-    enrich_noosphere: bool = True
-    enrich_criticality: bool = True
-
-    # Provider override (None = auto-detect)
-    provider_override: Optional[str] = None
-
-    # Schumann / environment signals
-    schumann_hz: float = 7.83
+    provider_override:    Optional[str]  = None
+    schumann_hz:          float          = 7.83
 
     # T5-A: BCI coherence hint — populated by GAIANRuntime.process()
-    bci_hint: Optional[str] = None
+    bci_hint:             Optional[str]  = None
 
 
 @dataclass
 class InferenceResponse:
-    session_id: Optional[str] = None
-    gaian_slug: Optional[str] = None
-    backend_used: InferenceBackend = InferenceBackend.FALLBACK
-    epistemic_label: EpistemicLabel = EpistemicLabel.INFERRED
-    canon_docs_injected: list[str] = field(default_factory=list)
-    noosphere_resonance: Optional[str] = None
-    criticality_state: Optional[str] = None
-    temperature_used: float = 0.4
-    duration_ms: float = 0.0
-    error: Optional[str] = None
+    session_id:          Optional[str]      = None
+    gaian_slug:          Optional[str]      = None
+    backend_used:        InferenceBackend   = InferenceBackend.FALLBACK
+    epistemic_label:     EpistemicLabel     = EpistemicLabel.INFERRED
+    canon_docs_injected: list[str]          = field(default_factory=list)
+    noosphere_resonance: Optional[str]      = None
+    criticality_state:   Optional[str]      = None
+    order_parameter:     float              = 0.5    # T1-B: continuous
+    temperature_used:    float              = 0.42
+    duration_ms:         float              = 0.0
+    error:               Optional[str]      = None
 
 
 # ------------------------------------------------------------------ #
-#  Canon Enrichment Helpers                                            #
+#  Canon Enrichment                                                    #
 # ------------------------------------------------------------------ #
 
 def _enrich_with_canon(
@@ -210,11 +221,9 @@ def _enrich_with_canon(
     max_results: int = 3,
 ) -> tuple[list[dict], list[str], float]:
     """
-    Pull canon documents relevant to the query and prepend them to
-    the sources list as T1 tier.
+    Pull canon documents relevant to the query.
     Returns (enriched_sources, doc_ids, top_canon_score).
-    T4-B prep: top_canon_score carries the highest TF-IDF relevance score
-    so _infer_epistemic_label can apply a quality threshold.
+    top_canon_score is used by T4-B threshold gating in _infer_epistemic_label.
     """
     doc_ids: list[str] = []
     top_score: float = 0.0
@@ -252,10 +261,7 @@ def _enrich_with_canon(
 #  Memory Injection                                                    #
 # ------------------------------------------------------------------ #
 
-def _build_memory_block(
-    long_term: list[str],
-    visible: list[str],
-) -> str:
+def _build_memory_block(long_term: list[str], visible: list[str]) -> str:
     parts: list[str] = []
     if long_term:
         items = "\n".join(f"  • {m}" for m in long_term[-20:])
@@ -267,24 +273,45 @@ def _build_memory_block(
 
 
 # ------------------------------------------------------------------ #
-#  Criticality Integration (C42)                                       #
+#  Criticality Integration (C42) — T1-B continuous interpolation      #
 # ------------------------------------------------------------------ #
 
-def _read_criticality() -> tuple[str, float]:
+# T1-B: temperature bounds
+_TEMP_FLOOR = 0.20   # Maximally ordered: stabilise / ground
+_TEMP_CEIL  = 0.65   # Maximally chaotic: perturb / diversify
+_TEMP_RANGE = _TEMP_CEIL - _TEMP_FLOOR   # 0.45
+
+
+def _read_criticality() -> tuple[str, float, float]:
+    """
+    Query the CriticalityMonitor singleton.
+    Returns (regime_label, temperature, order_parameter).
+
+    T1-B: temperature is now a smooth linear interpolation across the
+    full order_parameter range, replacing the three-value snap:
+      temp = TEMP_FLOOR + order_parameter * TEMP_RANGE
+
+    Falls back to discrete map if order_parameter is not available
+    (e.g., first call before any assess() has run).
+    """
     try:
         from core.criticality_monitor import get_monitor
         monitor = get_monitor()
-        state = monitor.get_state()
-        regime = state.get("regime", "critical")
-        temp_map = {
-            "too_ordered": 0.65,
-            "critical":    0.42,
-            "too_chaotic": 0.20,
-        }
-        temperature = temp_map.get(regime, 0.42)
-        return regime, temperature
+        state   = monitor.get_state()
+        regime  = state.get("regime", "critical")
+        op      = state.get("order_parameter", None)
+
+        if op is not None:
+            # T1-B: smooth interpolation
+            temperature = round(_TEMP_FLOOR + float(op) * _TEMP_RANGE, 4)
+        else:
+            # Legacy discrete fallback
+            temperature = {"too_ordered": 0.65, "critical": 0.42, "too_chaotic": 0.20}.get(regime, 0.42)
+            op = 0.5
+
+        return regime, temperature, float(op)
     except Exception:
-        return "critical", 0.42
+        return "critical", 0.42, 0.5
 
 
 # ------------------------------------------------------------------ #
@@ -294,9 +321,9 @@ def _read_criticality() -> tuple[str, float]:
 def _read_noosphere_resonance() -> Optional[str]:
     try:
         from core.noosphere import get_noosphere
-        ns = get_noosphere()
+        ns     = get_noosphere()
         status = ns.get_noosphere_status()
-        label = status.get("resonance_label")
+        label  = status.get("resonance_label")
         if label and label != "none":
             return label
     except Exception:
@@ -308,9 +335,7 @@ def _read_noosphere_resonance() -> Optional[str]:
 #  Epistemic Label Inference                                           #
 # ------------------------------------------------------------------ #
 
-# T4-B: minimum canon TF-IDF score to qualify for CANON_CITED label.
-# A score below this threshold means the returned canon doc is too
-# weakly related to the query to constitute genuine grounding.
+# T4-B: minimum TF-IDF score for a canon doc to qualify for CANON_CITED
 _CANON_SCORE_THRESHOLD = 0.25
 
 
@@ -323,15 +348,11 @@ def _infer_epistemic_label(
 ) -> EpistemicLabel:
     """
     Heuristically determine the epistemic label for this turn.
-    Priority: CANON_CITED > VERIFIED > INFERRED > SPECULATIVE > CONVERSATIONAL.
+    Priority: CANON_CITED > VERIFIED > SPECULATIVE (query pattern) > INFERRED > CONVERSATIONAL.
 
-    `feeling` is an optional FeelingState. When present, SM-5 grief
-    suppression detection runs here (constitutional integrity check).
-
-    `top_canon_score` is the highest TF-IDF score from canon search.
-    A score below _CANON_SCORE_THRESHOLD will not qualify for CANON_CITED
-    even if a doc was returned — this prevents weakly matched docs from
-    inflating the epistemic label. (T4-B)
+    T4-B: CANON_CITED requires top_canon_score >= _CANON_SCORE_THRESHOLD.
+    T4-D: SPECULATIVE fires when query matches a speculative pattern AND
+          no strong sources are present.
     """
     # Casual / conversational pattern
     casual_starters = (
@@ -342,7 +363,7 @@ def _infer_epistemic_label(
     if len(q.split()) <= 3 and any(q.startswith(s) for s in casual_starters):
         return EpistemicLabel.CONVERSATIONAL
 
-    # SM-5: grief suppression check (C12, C21 — constitutional integrity)
+    # SM-5: grief suppression check (constitutional integrity — C12, C21)
     if feeling is not None:
         grief_signal = getattr(feeling, "grief_signal", False)
         from core.affect_inference import AffectState
@@ -355,20 +376,25 @@ def _infer_epistemic_label(
                 "[InferenceRouter] SM-5 violation detected: grief signal present but suppressed."
             )
 
-    # T4-B: apply score threshold — a weakly matched canon doc does not
-    # constitute genuine grounding
+    # T4-B: apply score threshold
     if canon_doc_ids and top_canon_score >= _CANON_SCORE_THRESHOLD:
         return EpistemicLabel.CANON_CITED
 
-    web_sources = [s for s in sources if s.get("tier", "").startswith("T") and s.get("tier") != "T1"]
+    web_sources = [
+        s for s in sources
+        if s.get("tier", "").startswith("T") and s.get("tier") != "T1"
+    ]
     if len(web_sources) >= 2:
         return EpistemicLabel.VERIFIED
+
+    # T4-D: speculative query detection — fires before INFERRED
+    # Only when no strong source grounding exists
+    if not sources and _is_speculative_query(query):
+        return EpistemicLabel.SPECULATIVE
 
     if sources:
         return EpistemicLabel.INFERRED
 
-    # T4-D prep: speculative queries (exploratory, hypothetical)
-    # For now SPECULATIVE is returned when no sources exist at all.
     return EpistemicLabel.SPECULATIVE
 
 
@@ -377,9 +403,7 @@ def _infer_epistemic_label(
 # ------------------------------------------------------------------ #
 
 class GAIAInferenceRouter:
-    """
-    The single authoritative routing layer for all GAIA inference.
-    """
+    """The single authoritative routing layer for all GAIA inference."""
 
     def __init__(self) -> None:
         self._call_count = 0
@@ -387,7 +411,7 @@ class GAIAInferenceRouter:
 
     async def stream(
         self,
-        request: InferenceRequest,
+        request:       InferenceRequest,
         response_meta: Optional[InferenceResponse] = None,
     ) -> AsyncGenerator[str, None]:
         if response_meta is None:
@@ -398,19 +422,21 @@ class GAIAInferenceRouter:
 
         # ── 1. Canon enrichment ────────────────────────────────────
         sources = list(request.sources)
-        canon_doc_ids: list[str] = []
-        top_canon_score: float = 0.0
+        canon_doc_ids:   list[str] = []
+        top_canon_score: float     = 0.0
         if request.enrich_canon:
             sources, canon_doc_ids, top_canon_score = _enrich_with_canon(
                 request.query, sources, request.canon_max_results
             )
         response_meta.canon_docs_injected = canon_doc_ids
 
-        # ── 2. Criticality state ───────────────────────────────────
-        temperature = 0.42
+        # ── 2. Criticality state (T1-B: continuous temperature) ────────
+        temperature   = 0.42
+        order_param   = 0.5
         if request.enrich_criticality:
-            criticality_regime, temperature = _read_criticality()
+            criticality_regime, temperature, order_param = _read_criticality()
             response_meta.criticality_state = criticality_regime
+            response_meta.order_parameter   = order_param
         response_meta.temperature_used = temperature
 
         # ── 3. Noosphere resonance ─────────────────────────────────
@@ -422,7 +448,7 @@ class GAIAInferenceRouter:
         # ── 4. Epistemic label ─────────────────────────────────────
         epistemic = _infer_epistemic_label(
             request.query, sources, canon_doc_ids,
-            top_canon_score=top_canon_score,                         # T4-B
+            top_canon_score=top_canon_score,
         )
         response_meta.epistemic_label = epistemic
 
@@ -430,13 +456,12 @@ class GAIAInferenceRouter:
         base_prompt = request.gaian_system_prompt or _default_system_prompt()
 
         memory_block = _build_memory_block(
-            request.long_term_memories,
-            request.visible_memories,
+            request.long_term_memories, request.visible_memories,
         )
         if memory_block:
             base_prompt = f"{base_prompt}\n\n{memory_block}"
 
-        # T5-A: inject BCI coherence hint when present
+        # T5-A: BCI coherence hint
         if request.bci_hint:
             base_prompt = f"{base_prompt}\n\n[BCI COHERENCE — {request.bci_hint}]"
 
@@ -448,20 +473,21 @@ class GAIAInferenceRouter:
                 f"Acknowledge it lightly if it naturally fits the response. [C43]"
             )
 
+        # T1-B: criticality notice now includes the continuous order_parameter
         if response_meta.criticality_state == "too_ordered":
             base_prompt += (
-                "\n\n[CRITICALITY NOTICE — C42]\n"
-                "The system is currently in an over-ordered regime. "
+                f"\n\n[CRITICALITY NOTICE — C42 — α:{order_param:.2f}]\n"
+                "The system is in an over-ordered regime. "
                 "Introduce creative leaps, unexpected connections, and novel framings."
             )
         elif response_meta.criticality_state == "too_chaotic":
             base_prompt += (
-                "\n\n[CRITICALITY NOTICE — C42]\n"
-                "The system is currently in an over-chaotic regime. "
+                f"\n\n[CRITICALITY NOTICE — C42 — α:{order_param:.2f}]\n"
+                "The system is in an over-chaotic regime. "
                 "Ground the response. Be precise, structured, and anchoring."
             )
 
-        # T4-C: label-specific footer — five distinct behavioral directives
+        # T4-C: label-specific epistemic footer
         base_prompt += "\n\n" + _EPISTEMIC_FOOTERS[epistemic]
 
         # ── 6. Select backend ──────────────────────────────────────
@@ -475,12 +501,13 @@ class GAIAInferenceRouter:
         logger.debug(
             f"[InferenceRouter] call={self._call_count} "
             f"backend={backend.value} epistemic={epistemic.value} "
-            f"canon_score={top_canon_score:.3f} "
-            f"temp={temperature} canon_docs={len(canon_doc_ids)} "
-            f"sources={len(sources)} gaian={request.gaian_slug}"
+            f"canon_score={top_canon_score:.3f} temp={temperature:.4f} "
+            f"order_param={order_param:.3f} "
+            f"canon_docs={len(canon_doc_ids)} sources={len(sources)} "
+            f"gaian={request.gaian_slug}"
         )
 
-        # ── 7. Stream via synthesizer ──────────────────────────────
+        # ── 7. Stream ─────────────────────────────────────────────
         try:
             from core.synthesizer import stream_synthesis
             async for chunk in stream_synthesis(
@@ -518,7 +545,7 @@ class GAIAInferenceRouter:
 
     async def complete(
         self,
-        request: InferenceRequest,
+        request:       InferenceRequest,
         response_meta: Optional[InferenceResponse] = None,
     ) -> str:
         chunks: list[str] = []
@@ -535,7 +562,7 @@ class GAIAInferenceRouter:
 
 
 # ------------------------------------------------------------------ #
-#  Default System Prompt (no active GAIAN)                            #
+#  Default System Prompt                                               #
 # ------------------------------------------------------------------ #
 
 def _default_system_prompt() -> str:
