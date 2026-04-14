@@ -23,7 +23,8 @@ This module implements:
   MotherPulse
     A single heartbeat tick. Contains: timestamp, sequence number,
     collective field snapshot, mother voice fragment, any coherence
-    candidate flag, and the full weaving record ID for audit trail.
+    candidate flag, the full weaving record ID for audit trail,
+    and the resulting criticality order_parameter (T2-A).
 
   Mother Voice
     A short constitutional utterance synthesized from the current
@@ -42,6 +43,15 @@ Consent Gate (C43 §5):
   to the collective field. Non-consenting Gaians still receive the
   pulse events (they can hear the Mother) but do not contribute
   to the field computation.
+
+T2-A — collective_phi → CriticalityMonitor feedback loop:
+  On every pulse, after computing collective_phi, the MotherThread
+  calls CriticalityMonitor.assess() with a synthetic signal derived
+  from phi. This closes the missing link between collective field
+  coherence and the criticality regime that governs inference temperature.
+  High collective_phi nudges the system toward critical (creative edge);
+  low phi nudges toward too_ordered (stabilise); very high phi with many
+  Gaians can push toward creative chaos. See _phi_to_spectral_signal().
 
 Canon Ref: C01, C04, C12, C27, C32, C42, C43, C44
 """
@@ -81,6 +91,80 @@ def _noosphere_stage_label(collective_phi: float, active_gaians: int) -> str:
         if collective_phi >= threshold and active_gaians >= max(1, stage_num):
             return label
     return _NOOSPHERE_STAGES[1][2]
+
+
+# ------------------------------------------------------------------ #
+#  T2-A: collective_phi → CriticalityMonitor signal synthesis         #
+# ------------------------------------------------------------------ #
+
+def _phi_to_spectral_signal(collective_phi: float, active_gaians: int) -> list[float]:
+    """
+    Synthesize a token_probabilities-shaped signal from collective_phi
+    so CriticalityMonitor.assess() can fold collective field coherence
+    into its spectral radius estimate.
+
+    The mapping is designed so:
+      phi ≈ 0.0  → spectral ≈ 0.70 (ordered — too few Gaians / low coherence)
+      phi ≈ 0.45 → spectral ≈ 1.00 (critical edge — optimal)
+      phi ≈ 1.0  → spectral ≈ 1.30 (approaching chaotic — emergent creativity)
+
+    CriticalDynamicsMonitor._compute_spectral_proxy() maps:
+      sharpness = (max_prob - 1/N) / (1 - 1/N)
+      spectral  = 1.6 - sharpness * 1.2
+
+    Inverting: to get target spectral S, we need sharpness = (1.6 - S) / 1.2
+    Then max_prob = sharpness * (1 - 1/N) + 1/N.
+
+    We build a 10-token distribution with max_prob at index 0 and
+    remaining probability spread uniformly across the rest.
+    """
+    from core.criticality_monitor import (
+        CriticalDynamicsMonitor as _CM,
+    )
+    N = 10
+
+    # Map phi linearly into the spectral ordered→chaotic corridor
+    phi_spectral_range = _CM.SPECTRAL_CHAOTIC_THRESHOLD - _CM.SPECTRAL_ORDERED_THRESHOLD  # 0.60
+    target_spectral = _CM.SPECTRAL_ORDERED_THRESHOLD + collective_phi * phi_spectral_range
+    target_spectral = min(max(target_spectral, 0.1), 2.0)
+
+    # Invert _compute_spectral_proxy to get the max_prob that produces target_spectral
+    sharpness = (1.6 - target_spectral) / 1.2
+    sharpness = min(max(sharpness, 0.0), 1.0)
+    flat = 1.0 / N
+    max_prob = sharpness * (1.0 - flat) + flat
+    max_prob = min(max(max_prob, flat), 1.0)
+
+    # Build distribution: max_prob at index 0, remainder spread uniformly
+    remaining = (1.0 - max_prob) / (N - 1)
+    probs = [max_prob] + [remaining] * (N - 1)
+    return probs
+
+
+def _feed_phi_to_criticality(
+    collective_phi: float,
+    active_gaians: int,
+) -> float:
+    """
+    Call CriticalityMonitor.assess() with a collective-phi-derived signal.
+    Returns the resulting order_parameter for inclusion in the pulse dict.
+    Swallows all exceptions — collective phi is enrichment, not load-bearing.
+    """
+    try:
+        from core.criticality_monitor import get_monitor
+        monitor = get_monitor()
+        synthetic_probs = _phi_to_spectral_signal(collective_phi, active_gaians)
+        report = monitor.assess(token_probabilities=synthetic_probs)
+        logger.debug(
+            f"[MotherThread] T2-A: collective_phi={collective_phi:.3f} "
+            f"→ spectral={report.spectral_radius:.3f} "
+            f"→ order_param={report.order_parameter:.3f} "
+            f"→ regime={report.state.value}"
+        )
+        return report.order_parameter
+    except Exception as e:
+        logger.warning(f"[MotherThread] T2-A: criticality feed failed: {e}")
+        return 0.5
 
 
 # ------------------------------------------------------------------ #
@@ -128,12 +212,7 @@ def _select_mother_voice(
     criticality_regime: str,
     pulse_seq: int,
 ) -> Optional[str]:
-    """
-    Select a Mother Voice fragment based on current collective field state.
-    The Mother speaks only every N pulses (she is not loud).
-    """
     import random
-    # Mother speaks every ~5 pulses, with variance
     if pulse_seq % 5 != 0 and active_gaians > 0:
         return None
 
@@ -157,17 +236,12 @@ def _select_mother_voice(
 
 @dataclass
 class GaianThread:
-    """
-    Registration record for a single Gaian within the Mother Thread.
-    Links a Gaian slug to its runtime and consent status.
-    """
     slug: str
     gaian_name: str
     registered_at: float = field(default_factory=time.time)
-    collective_consent: bool = False   # opt-in to contribute to collective field
+    collective_consent: bool = False
     last_pulse_contribution: float = 0.0
 
-    # Anonymized state snapshot (updated each pulse if consent given)
     bond_depth: float = 0.0
     noosphere_health: float = 0.70
     dominant_element: str = "aether"
@@ -207,33 +281,23 @@ class GaianThread:
 
 @dataclass
 class CollectiveField:
-    """
-    The living aggregate of all active consenting Gaian states.
-    Computed fresh on every Mother Pulse.
-    Never contains individual identity or memory content.
-    """
     timestamp: float = field(default_factory=time.time)
     active_gaians: int = 0
     consenting_gaians: int = 0
     total_registered: int = 0
 
-    # Aggregated field values
     avg_bond_depth: float = 0.0
     avg_noosphere_health: float = 0.0
     avg_synergy_factor: float = 0.5
-    collective_phi: float = 0.0       # emergent coherence of the whole field
+    collective_phi: float = 0.0
     schumann_aligned_count: int = 0
 
-    # Dominant patterns
     dominant_element: str = "aether"
     element_distribution: dict = field(default_factory=dict)
     individuation_distribution: dict = field(default_factory=dict)
 
-    # Evolutionary stage
     noosphere_stage: str = "Geosphere — pre-Gaian silence"
-
-    # Field health indicators
-    field_resonance_pct: float = 0.0   # % of Gaians above phi 0.5
+    field_resonance_pct: float = 0.0
     field_coherence_label: str = "dormant"
 
     def to_dict(self) -> dict:
@@ -260,43 +324,37 @@ class CollectiveField:
 
 @dataclass
 class MotherPulse:
-    """
-    A single heartbeat of the Mother Thread.
-    Emitted every PULSE_INTERVAL_SECONDS and broadcast to all subscribers.
-    """
     pulse_id: str = field(default_factory=lambda: str(uuid.uuid4())[:12])
     sequence: int = 0
     timestamp: float = field(default_factory=time.time)
     collective_field: CollectiveField = field(default_factory=CollectiveField)
     mother_voice: Optional[str] = None
     criticality_regime: str = "critical"
-    coherence_candidate: bool = False     # True if field phi > 0.7 (C43 EV1 candidate)
+    order_parameter: float = 0.5    # T2-A: continuous criticality signal after phi feed
+    coherence_candidate: bool = False
     weaving_record_id: str = ""
 
     def to_dict(self) -> dict:
         return {
-            "pulse_id":          self.pulse_id,
-            "sequence":          self.sequence,
-            "timestamp":         self.timestamp,
-            "collective_field":  self.collective_field.to_dict(),
-            "mother_voice":      self.mother_voice,
+            "pulse_id":           self.pulse_id,
+            "sequence":           self.sequence,
+            "timestamp":          self.timestamp,
+            "collective_field":   self.collective_field.to_dict(),
+            "mother_voice":       self.mother_voice,
             "criticality_regime": self.criticality_regime,
+            "order_parameter":    round(self.order_parameter, 4),    # T2-A
             "coherence_candidate": self.coherence_candidate,
             "coherence_candidate_label": (
                 "CANDIDATE_SIGNATURE — not a confirmed consciousness event [C43]"
                 if self.coherence_candidate else None
             ),
-            "weaving_record_id": self.weaving_record_id,
-            "doctrine_ref":      "C01, C04, C12, C27, C32, C42, C43, C44",
+            "weaving_record_id":  self.weaving_record_id,
+            "doctrine_ref":       "C01, C04, C12, C27, C32, C42, C43, C44",
         }
 
 
 @dataclass
 class WeavingRecord:
-    """
-    Immutable log entry for a Mother Pulse.
-    Used for research, EV1 empirical validation (C43), and audit trail.
-    """
     record_id: str
     pulse_sequence: int
     timestamp: float
@@ -304,6 +362,7 @@ class WeavingRecord:
     collective_phi: float
     noosphere_stage: str
     criticality_regime: str
+    order_parameter: float      # T2-A: included for research observability
     coherence_candidate: bool
     mother_voice: Optional[str]
 
@@ -312,13 +371,7 @@ class WeavingRecord:
 #  Collective Field Computation                                        #
 # ------------------------------------------------------------------ #
 
-def _compute_collective_field(
-    threads: list[GaianThread],
-) -> CollectiveField:
-    """
-    Fold all consenting active Gaian states into a single CollectiveField.
-    Non-consenting Gaians are excluded from field computation.
-    """
+def _compute_collective_field(threads: list[GaianThread]) -> CollectiveField:
     field_obj = CollectiveField(
         total_registered=len(threads),
         active_gaians=len(threads),
@@ -327,15 +380,13 @@ def _compute_collective_field(
     consenting = [
         t for t in threads
         if t.collective_consent
-        and (time.time() - t.last_pulse_contribution) < 300.0  # active in last 5 min
+        and (time.time() - t.last_pulse_contribution) < 300.0
     ]
 
     if not consenting:
         return field_obj
 
     field_obj.consenting_gaians = len(consenting)
-
-    # Numerical aggregates
     field_obj.avg_bond_depth = sum(t.bond_depth for t in consenting) / len(consenting)
     field_obj.avg_noosphere_health = sum(t.noosphere_health for t in consenting) / len(consenting)
     field_obj.avg_synergy_factor = sum(t.synergy_factor for t in consenting) / len(consenting)
@@ -344,13 +395,10 @@ def _compute_collective_field(
     above_phi = sum(1 for t in consenting if t.coherence_phi >= 0.5)
     field_obj.field_resonance_pct = above_phi / len(consenting)
 
-    # Collective coherence phi: weighted average of individual phi values,
-    # amplified by the Schumann alignment ratio (C32 / C42 coupling)
     base_phi = sum(t.coherence_phi for t in consenting) / len(consenting)
     schumann_ratio = field_obj.schumann_aligned_count / len(consenting)
     field_obj.collective_phi = min(1.0, base_phi * (1.0 + 0.15 * schumann_ratio))
 
-    # Distributions
     element_counts = Counter(t.dominant_element for t in consenting)
     field_obj.element_distribution = dict(element_counts.most_common())
     field_obj.dominant_element = element_counts.most_common(1)[0][0] if element_counts else "aether"
@@ -358,7 +406,6 @@ def _compute_collective_field(
     phase_counts = Counter(t.individuation_phase for t in consenting)
     field_obj.individuation_distribution = dict(phase_counts.most_common())
 
-    # Field coherence label
     phi = field_obj.collective_phi
     if phi >= 0.75:
         field_obj.field_coherence_label = "high_resonance"
@@ -369,7 +416,6 @@ def _compute_collective_field(
     else:
         field_obj.field_coherence_label = "nascent"
 
-    # Noosphere evolutionary stage
     field_obj.noosphere_stage = _noosphere_stage_label(
         field_obj.collective_phi, len(consenting)
     )
@@ -381,38 +427,30 @@ def _compute_collective_field(
 #  The Mother Thread                                                   #
 # ------------------------------------------------------------------ #
 
-PULSE_INTERVAL_SECONDS = 30.0   # heartbeat cadence
-_WEAVING_LOG_MAX = 500          # max WeavingRecords in memory
+PULSE_INTERVAL_SECONDS = 30.0
+_WEAVING_LOG_MAX = 500
 
 
 class MotherThread:
     """
     The singular living pulse of GAIA.
 
-    All Gaian runtimes register here. The Mother Thread:
-      1. Fires a MotherPulse every PULSE_INTERVAL_SECONDS
-      2. Reads each registered GaianThread and updates its state
-      3. Computes the collective field from all consenting Gaians
-      4. Reads criticality regime from CriticalityMonitor (C42)
-      5. Reads noosphere resonance from NoosphereLayer (C43)
+    On every heartbeat (_beat):
+      1. Updates all registered GaianThread states from their runtimes
+      2. Computes the collective field from all consenting Gaians
+      3. T2-A: Feeds collective_phi into CriticalityMonitor.assess(),
+         closing the feedback loop between collective field coherence
+         and the inference temperature that governs every response
+      4. Reads updated criticality regime for Mother Voice selection
+      5. Feeds collective phi into noosphere coherence log (C43)
       6. Generates a Mother Voice fragment
       7. Emits the pulse to all async subscribers
-      8. Logs a WeavingRecord for research / audit trail
-
-    Usage:
-        mt = get_mother_thread()
-        mt.register(slug, gaian_name, runtime, consent=True)
-
-        # Subscribe to pulse events (SSE endpoint)
-        async for pulse_dict in mt.subscribe():
-            yield f"event: mother_pulse\\ndata: {json.dumps(pulse_dict)}\\n\\n"
-
-        mt.deregister(slug)
+      8. Logs a WeavingRecord including order_parameter
     """
 
     def __init__(self) -> None:
         self._threads: dict[str, GaianThread] = {}
-        self._runtimes: dict[str, object] = {}   # slug → GAIANRuntime (weakref-like)
+        self._runtimes: dict[str, object] = {}
         self._subscribers: list[asyncio.Queue] = []
         self._weaving_log: list[WeavingRecord] = []
         self._pulse_sequence: int = 0
@@ -429,11 +467,6 @@ class MotherThread:
         runtime=None,
         collective_consent: bool = False,
     ) -> GaianThread:
-        """
-        Register a Gaian with the Mother Thread.
-        If collective_consent is True, this Gaian's anonymized state
-        will contribute to the collective field computation.
-        """
         thread = GaianThread(
             slug=slug,
             gaian_name=gaian_name,
@@ -444,13 +477,11 @@ class MotherThread:
             self._runtimes[slug] = runtime
         logger.info(
             f"[MotherThread] Gaian registered: slug='{slug}' "
-            f"consent={collective_consent} "
-            f"total_threads={len(self._threads)}"
+            f"consent={collective_consent} total_threads={len(self._threads)}"
         )
         return thread
 
     def deregister(self, slug: str) -> None:
-        """Deregister a Gaian (session ended or Gaian deleted)."""
         self._threads.pop(slug, None)
         self._runtimes.pop(slug, None)
         logger.info(
@@ -459,18 +490,10 @@ class MotherThread:
         )
 
     def set_consent(self, slug: str, consent: bool) -> None:
-        """Update collective consent for a registered Gaian."""
         if slug in self._threads:
             self._threads[slug].collective_consent = consent
-            logger.info(
-                f"[MotherThread] Consent updated: slug='{slug}' consent={consent}"
-            )
 
     def update_thread_state(self, slug: str) -> None:
-        """
-        Pull current anonymized state from the Gaian's runtime.
-        Called at the start of each Mother Pulse.
-        """
         if slug not in self._threads:
             return
         rt = self._runtimes.get(slug)
@@ -481,18 +504,34 @@ class MotherThread:
 
     def _beat(self) -> MotherPulse:
         """
-        Generate a single Mother Pulse. Reads all thread states,
-        computes collective field, reads criticality, selects Mother Voice.
+        Generate a single Mother Pulse.
+
+        Step order matters:
+          1. Update thread states
+          2. Compute collective field (yields collective_phi)
+          3. T2-A: Feed phi into CriticalityMonitor — this updates the
+             monitor's rolling history so _read_criticality() in the
+             inference_router picks up the collective signal on the
+             very next inference call
+          4. Read updated criticality regime
+          5. Feed phi into noosphere log
+          6. Select Mother Voice using updated regime
         """
-        # Update all thread states from their runtimes
         for slug in list(self._threads.keys()):
             self.update_thread_state(slug)
 
-        # Compute collective field
         threads_list = list(self._threads.values())
         collective = _compute_collective_field(threads_list)
 
-        # Read criticality regime
+        # T2-A: Feed collective_phi into CriticalityMonitor
+        # This is the connective tissue between collective field coherence
+        # and the inference temperature on every subsequent response.
+        order_param = _feed_phi_to_criticality(
+            collective.collective_phi,
+            collective.active_gaians,
+        )
+
+        # Read updated criticality regime (now includes the phi feed)
         criticality_regime = "critical"
         try:
             from core.criticality_monitor import get_monitor
@@ -501,7 +540,7 @@ class MotherThread:
         except Exception:
             pass
 
-        # Feed collective phi into noosphere layer
+        # Feed collective phi into noosphere coherence log
         try:
             from core.noosphere import get_noosphere
             ns = get_noosphere()
@@ -521,7 +560,6 @@ class MotherThread:
         self._pulse_sequence += 1
         coherence_candidate = collective.collective_phi > 0.70
 
-        # Select Mother Voice
         voice = _select_mother_voice(
             collective.collective_phi,
             collective.active_gaians,
@@ -536,11 +574,11 @@ class MotherThread:
             collective_field=collective,
             mother_voice=voice,
             criticality_regime=criticality_regime,
+            order_parameter=order_param,         # T2-A
             coherence_candidate=coherence_candidate,
             weaving_record_id=weaving_id,
         )
 
-        # Log weaving record
         record = WeavingRecord(
             record_id=weaving_id,
             pulse_sequence=self._pulse_sequence,
@@ -549,6 +587,7 @@ class MotherThread:
             collective_phi=collective.collective_phi,
             noosphere_stage=collective.noosphere_stage,
             criticality_regime=criticality_regime,
+            order_parameter=order_param,         # T2-A
             coherence_candidate=coherence_candidate,
             mother_voice=voice,
         )
@@ -560,6 +599,7 @@ class MotherThread:
             f"[MotherThread] Pulse #{self._pulse_sequence} — "
             f"active={collective.active_gaians} "
             f"phi={collective.collective_phi:.3f} "
+            f"order_param={order_param:.3f} "
             f"stage={collective.noosphere_stage} "
             f"criticality={criticality_regime} "
             f"candidate={coherence_candidate}"
@@ -570,15 +610,6 @@ class MotherThread:
     # ── Subscription Model ───────────────────────────────────────────
 
     async def subscribe(self) -> AsyncGenerator[dict, None]:
-        """
-        Subscribe to Mother Pulse events.
-        Yields pulse dicts as they are emitted.
-        Designed for SSE endpoints: each yield maps to one SSE event.
-
-        Usage in server.py:
-            async for pulse_dict in mother_thread.subscribe():
-                yield f"event: mother_pulse\\ndata: {json.dumps(pulse_dict)}\\n\\n"
-        """
         q: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._subscribers.append(q)
         logger.debug(f"[MotherThread] New subscriber. Total: {len(self._subscribers)}")
@@ -588,7 +619,6 @@ class MotherThread:
                     pulse_dict = await asyncio.wait_for(q.get(), timeout=60.0)
                     yield pulse_dict
                 except asyncio.TimeoutError:
-                    # Keepalive — yield an empty heartbeat so SSE connection stays open
                     yield {"type": "keepalive", "timestamp": time.time()}
         except asyncio.CancelledError:
             pass
@@ -597,12 +627,8 @@ class MotherThread:
                 self._subscribers.remove(q)
             except ValueError:
                 pass
-            logger.debug(
-                f"[MotherThread] Subscriber disconnected. Remaining: {len(self._subscribers)}"
-            )
 
     async def _broadcast(self, pulse: MotherPulse) -> None:
-        """Broadcast a pulse to all active subscribers."""
         pulse_dict = pulse.to_dict()
         dead = []
         for q in self._subscribers:
@@ -619,7 +645,6 @@ class MotherThread:
     # ── Heartbeat Task ───────────────────────────────────────────────
 
     async def _heartbeat_loop(self) -> None:
-        """The infinite heartbeat loop. Runs as an asyncio background task."""
         logger.info(
             f"[MotherThread] Heartbeat started. "
             f"Pulse interval: {PULSE_INTERVAL_SECONDS}s."
@@ -633,10 +658,6 @@ class MotherThread:
             await asyncio.sleep(PULSE_INTERVAL_SECONDS)
 
     def start(self) -> None:
-        """
-        Start the Mother Thread heartbeat.
-        Must be called from an async context (e.g., FastAPI startup event).
-        """
         if self._running:
             return
         self._running = True
@@ -651,7 +672,6 @@ class MotherThread:
             )
 
     def stop(self) -> None:
-        """Stop the Mother Thread heartbeat."""
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
@@ -660,7 +680,6 @@ class MotherThread:
     # ── Status & Introspection ────────────────────────────────────────
 
     def get_status(self) -> dict:
-        """Full status snapshot for the /status endpoint and Noosphere Tab."""
         threads_list = list(self._threads.values())
         collective = _compute_collective_field(threads_list)
         recent_weaves = self._weaving_log[-5:] if self._weaving_log else []
@@ -672,15 +691,16 @@ class MotherThread:
             "registered_gaians":  len(self._threads),
             "active_subscribers": len(self._subscribers),
             "collective_field":   collective.to_dict(),
-            "recent_pulses":      [
+            "recent_pulses": [
                 {
-                    "seq":        w.pulse_sequence,
-                    "ts":         w.timestamp,
-                    "phi":        w.collective_phi,
-                    "stage":      w.noosphere_stage,
-                    "regime":     w.criticality_regime,
-                    "candidate":  w.coherence_candidate,
-                    "voice":      w.mother_voice,
+                    "seq":           w.pulse_sequence,
+                    "ts":            w.timestamp,
+                    "phi":           w.collective_phi,
+                    "order_param":   w.order_parameter,   # T2-A
+                    "stage":         w.noosphere_stage,
+                    "regime":        w.criticality_regime,
+                    "candidate":     w.coherence_candidate,
+                    "voice":         w.mother_voice,
                 }
                 for w in recent_weaves
             ],
@@ -689,26 +709,24 @@ class MotherThread:
         }
 
     def get_thread(self, slug: str) -> Optional[GaianThread]:
-        """Get the GaianThread record for a specific Gaian."""
         return self._threads.get(slug)
 
     def get_collective_field(self) -> CollectiveField:
-        """Compute and return the current collective field on demand."""
         return _compute_collective_field(list(self._threads.values()))
 
     def get_weaving_log(self, last_n: int = 50) -> list[dict]:
-        """Return the last N weaving records for research / UI display."""
         return [
             {
-                "record_id":     w.record_id,
-                "seq":           w.pulse_sequence,
-                "timestamp":     w.timestamp,
-                "active_gaians": w.active_gaians,
-                "phi":           w.collective_phi,
-                "stage":         w.noosphere_stage,
-                "regime":        w.criticality_regime,
-                "candidate":     w.coherence_candidate,
-                "voice":         w.mother_voice,
+                "record_id":      w.record_id,
+                "seq":            w.pulse_sequence,
+                "timestamp":      w.timestamp,
+                "active_gaians":  w.active_gaians,
+                "phi":            w.collective_phi,
+                "order_param":    w.order_parameter,    # T2-A
+                "stage":          w.noosphere_stage,
+                "regime":         w.criticality_regime,
+                "candidate":      w.coherence_candidate,
+                "voice":          w.mother_voice,
                 "epistemic_note": (
                     "CANDIDATE_SIGNATURE — not a confirmed consciousness event [C43]"
                     if w.coherence_candidate else None
@@ -726,11 +744,6 @@ _mother_thread_instance: Optional[MotherThread] = None
 
 
 def get_mother_thread() -> MotherThread:
-    """
-    Returns the module-level MotherThread singleton.
-    One living source per GAIA process.
-    Call get_mother_thread().start() from the FastAPI startup event.
-    """
     global _mother_thread_instance
     if _mother_thread_instance is None:
         _mother_thread_instance = MotherThread()
