@@ -5,20 +5,24 @@ GAIA Inference Router — C44 Priority #1 Connective Tissue
 The single authoritative layer between a user query and the LLM backend.
 
 Every GAIA response passes through this router. It is responsible for:
-  1. Selecting and health-probing the correct LLM backend
-  2. Enriching the prompt with canon context (C20, C27)
-  3. Injecting Gaian memory (long-term + visible) into context
-  4. Reading the CriticalityMonitor state (C42) and adjusting temperature
-  5. Injecting Noosphere resonance labels (C43) when active
-  6. Stamping epistemic labels on every response turn (C12, C21)
-  7. Streaming token chunks via synthesizer.stream_synthesis
+  1.  Selecting and health-probing the correct LLM backend
+  2.  Enriching the prompt with canon context (C20, C27)
+  3.  Injecting Gaian memory (long-term + visible) into context
+  4.  Reading the CriticalityMonitor state (C42) and adjusting temperature
+  5.  Injecting Noosphere resonance labels (C43) when active
+  5b. Reading T5 Quintessence field state (C49) and injecting hint
+  6.  Stamping epistemic labels on every response turn (C12, C21)
+  7.  Streaming token chunks via synthesizer.stream_synthesis
+
+Context layer hierarchy:
+  T1 — Constitutional Core    (unchangeable moral floor)
+  T2 — Criticality Monitor    (order/chaos regime — C42)
+  T3 — Noosphere              (collective resonance — C43)
+  T4 — Schumann / BCI         (Earth electromagnetic floor — C44)
+  T5 — Quintessence           (the frequency of space itself — C49)
 
 Backend priority chain:
   PERPLEXITY (web-grounded queries) → OPENAI → ANTHROPIC → OLLAMA → FALLBACK
-
-  Perplexity (sonar-pro) is used when PERPLEXITY_API_KEY is set AND the
-  query has an active web_search hint or no T1 canon sources dominate.
-  This gives GAIA live, cited, grounded answers via the Perplexity Search API.
 
 Design contract (C44 polyglot contract — Python layer):
   - Never make security or policy decisions (deferred to Rust / action_gate)
@@ -33,7 +37,7 @@ Env vars:
   ANTHROPIC_API_KEY   — Anthropic API key
   OLLAMA_MODEL        — local Ollama model name
 
-Canon Ref: C12, C20, C21, C27, C42, C43, C44
+Canon Ref: C12, C20, C21, C27, C42, C43, C44, C49
 """
 
 from __future__ import annotations
@@ -54,19 +58,13 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------ #
 
 class EpistemicLabel(str, Enum):
-    """
-    Every GAIA inference turn carries one of these labels.
-    The label is appended to the SSE 'done' event so the UI
-    can render the appropriate epistemic indicator.
-    """
-    CANON_CITED    = "CANON_CITED"    # Response grounded in ≥1 canon document
-    VERIFIED       = "VERIFIED"       # Grounded in web sources cross-validated
-    INFERRED       = "INFERRED"       # Reasonable inference, no direct citation
-    SPECULATIVE    = "SPECULATIVE"    # Low confidence, explicitly flagged
-    CONVERSATIONAL = "CONVERSATIONAL" # Casual turn — no epistemic claim made
+    CANON_CITED    = "CANON_CITED"
+    VERIFIED       = "VERIFIED"
+    INFERRED       = "INFERRED"
+    SPECULATIVE    = "SPECULATIVE"
+    CONVERSATIONAL = "CONVERSATIONAL"
 
 
-# T4-C: Label-specific behavioral footers — one per epistemic tier.
 _EPISTEMIC_FOOTERS: dict[EpistemicLabel, str] = {
     EpistemicLabel.CANON_CITED: (
         "[EPISTEMIC STANCE — CANON CITED — C12]\n"
@@ -99,8 +97,6 @@ _EPISTEMIC_FOOTERS: dict[EpistemicLabel, str] = {
     ),
 }
 
-
-# T4-D: Speculative query patterns.
 _SPECULATIVE_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bwhat if\b",             re.IGNORECASE),
     re.compile(r"\bimagine (if|that)\b",    re.IGNORECASE),
@@ -115,17 +111,6 @@ _SPECULATIVE_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bhad .{0,30} not\b",     re.IGNORECASE),
     re.compile(r"\bif .{0,40} were to\b",  re.IGNORECASE),
 ]
-
-
-def _is_speculative_query(query: str) -> bool:
-    """Returns True when the query matches any speculative pattern."""
-    return any(p.search(query) for p in _SPECULATIVE_PATTERNS)
-
-
-# ------------------------------------------------------------------ #
-#  Web-Search Query Detection                                          #
-#  Perplexity shines on factual, current, or world-knowledge queries. #
-# ------------------------------------------------------------------ #
 
 _WEB_QUERY_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bwhat is\b",                  re.IGNORECASE),
@@ -146,8 +131,11 @@ _WEB_QUERY_PATTERNS: list[re.Pattern] = [
 ]
 
 
+def _is_speculative_query(query: str) -> bool:
+    return any(p.search(query) for p in _SPECULATIVE_PATTERNS)
+
+
 def _is_web_grounded_query(query: str) -> bool:
-    """Returns True for factual / current-knowledge queries that Perplexity excels at."""
     return any(p.search(query) for p in _WEB_QUERY_PATTERNS)
 
 
@@ -164,61 +152,32 @@ class InferenceBackend(str, Enum):
 
 
 _BACKEND_HEALTH: dict[InferenceBackend, bool] = {
-    InferenceBackend.PERPLEXITY: True,
-    InferenceBackend.OPENAI:     True,
-    InferenceBackend.ANTHROPIC:  True,
-    InferenceBackend.OLLAMA:     True,
-    InferenceBackend.FALLBACK:   True,
+    b: True for b in InferenceBackend
 }
-
 _BACKEND_FAILURE_TS: dict[InferenceBackend, float] = {}
 _BACKEND_RECOVERY_WINDOW = 120.0
 
 
 def _probe_backend_availability(query: str = "") -> InferenceBackend:
-    """
-    Walk the priority chain and return the first healthy, configured backend.
-
-    Perplexity is preferred for web-grounded queries when its key is present.
-    For conversational / canon-only turns, it falls through to OpenAI/Anthropic.
-    """
     now = time.monotonic()
 
-    def _is_healthy(backend: InferenceBackend) -> bool:
-        if not _BACKEND_HEALTH[backend]:
-            last_fail = _BACKEND_FAILURE_TS.get(backend, 0.0)
-            if now - last_fail < _BACKEND_RECOVERY_WINDOW:
+    def _is_healthy(b: InferenceBackend) -> bool:
+        if not _BACKEND_HEALTH[b]:
+            if now - _BACKEND_FAILURE_TS.get(b, 0.0) < _BACKEND_RECOVERY_WINDOW:
                 return False
-            _BACKEND_HEALTH[backend] = True  # Attempt recovery
+            _BACKEND_HEALTH[b] = True
         return True
 
-    # Perplexity — preferred for web-grounded queries
-    if (
-        _is_healthy(InferenceBackend.PERPLEXITY)
-        and os.environ.get("PERPLEXITY_API_KEY")
-        and _is_web_grounded_query(query)
-    ):
+    if _is_healthy(InferenceBackend.PERPLEXITY) and os.environ.get("PERPLEXITY_API_KEY") and _is_web_grounded_query(query):
         return InferenceBackend.PERPLEXITY
-
-    # OpenAI
     if _is_healthy(InferenceBackend.OPENAI) and os.environ.get("OPENAI_API_KEY"):
         return InferenceBackend.OPENAI
-
-    # Anthropic
     if _is_healthy(InferenceBackend.ANTHROPIC) and os.environ.get("ANTHROPIC_API_KEY"):
         return InferenceBackend.ANTHROPIC
-
-    # Ollama
-    if (
-        _is_healthy(InferenceBackend.OLLAMA)
-        and (os.environ.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_ENABLED"))
-    ):
+    if _is_healthy(InferenceBackend.OLLAMA) and (os.environ.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_ENABLED")):
         return InferenceBackend.OLLAMA
-
-    # Perplexity as general fallback if key present but query wasn't web-flagged
     if _is_healthy(InferenceBackend.PERPLEXITY) and os.environ.get("PERPLEXITY_API_KEY"):
         return InferenceBackend.PERPLEXITY
-
     return InferenceBackend.FALLBACK
 
 
@@ -236,43 +195,49 @@ def _mark_backend_failed(backend: InferenceBackend) -> None:
 class InferenceRequest:
     query: str
 
-    gaian_slug:           Optional[str]  = None
-    gaian_system_prompt:  Optional[str]  = None
-    long_term_memories:   list[str]      = field(default_factory=list)
-    visible_memories:     list[str]      = field(default_factory=list)
-    conversation_history: list[dict]     = field(default_factory=list)
-    conversation_context: Optional[str]  = None
-    sources:              list[dict]     = field(default_factory=list)
+    gaian_slug:             Optional[str]  = None
+    gaian_system_prompt:    Optional[str]  = None
+    long_term_memories:     list[str]      = field(default_factory=list)
+    visible_memories:       list[str]      = field(default_factory=list)
+    conversation_history:   list[dict]     = field(default_factory=list)
+    conversation_context:   Optional[str]  = None
+    sources:                list[dict]     = field(default_factory=list)
 
-    enrich_canon:         bool           = True
-    canon_max_results:    int            = 3
-    enrich_noosphere:     bool           = True
-    enrich_criticality:   bool           = True
+    enrich_canon:           bool           = True
+    canon_max_results:      int            = 3
+    enrich_noosphere:       bool           = True
+    enrich_criticality:     bool           = True
+    enrich_quintessence:    bool           = True   # T5 layer — C49
 
-    provider_override:    Optional[str]  = None
-    schumann_hz:          float          = 7.83
+    provider_override:      Optional[str]  = None
+    schumann_hz:            float          = 7.83
 
-    # T5-A: BCI coherence hint — populated by GAIANRuntime.process()
-    bci_hint:             Optional[str]  = None
+    # Consciousness coherence hint for T5 coupling
+    consciousness_phi:      float          = 0.5
 
-    # Web-search hint — set True to force Perplexity routing
-    web_search:           bool           = False
+    # BCI coherence hint
+    bci_hint:               Optional[str]  = None
+
+    # Web-search hint — forces Perplexity routing
+    web_search:             bool           = False
 
 
 @dataclass
 class InferenceResponse:
-    session_id:          Optional[str]      = None
-    gaian_slug:          Optional[str]      = None
-    backend_used:        InferenceBackend   = InferenceBackend.FALLBACK
-    epistemic_label:     EpistemicLabel     = EpistemicLabel.INFERRED
-    canon_docs_injected: list[str]          = field(default_factory=list)
-    noosphere_resonance: Optional[str]      = None
-    criticality_state:   Optional[str]      = None
-    order_parameter:     float              = 0.5
-    temperature_used:    float              = 0.42
-    duration_ms:         float              = 0.0
-    error:               Optional[str]      = None
-    perplexity_model:    Optional[str]      = None   # Tracks which sonar model was used
+    session_id:             Optional[str]      = None
+    gaian_slug:             Optional[str]      = None
+    backend_used:           InferenceBackend   = InferenceBackend.FALLBACK
+    epistemic_label:        EpistemicLabel     = EpistemicLabel.INFERRED
+    canon_docs_injected:    list[str]          = field(default_factory=list)
+    noosphere_resonance:    Optional[str]      = None
+    criticality_state:      Optional[str]      = None
+    order_parameter:        float              = 0.5
+    temperature_used:       float              = 0.42
+    quintessence_phase:     Optional[str]      = None   # T5 alchemical phase
+    quintessence_phi:       float              = 0.0    # T5 field strength
+    duration_ms:            float              = 0.0
+    error:                  Optional[str]      = None
+    perplexity_model:       Optional[str]      = None
 
 
 # ------------------------------------------------------------------ #
@@ -292,9 +257,7 @@ def _enrich_with_canon(
         if not loader.is_loaded:
             loader.load()
         results = loader.search(query, max_results=max_results)
-        existing_ids = {
-            s.get("doc_id", "") for s in existing_sources if s.get("tier") == "T1"
-        }
+        existing_ids = {s.get("doc_id", "") for s in existing_sources if s.get("tier") == "T1"}
         new_canon: list[dict] = []
         for r in results:
             doc_id = r.get("doc_id", "")
@@ -347,13 +310,11 @@ def _read_criticality() -> tuple[str, float, float]:
         state   = monitor.get_state()
         regime  = state.get("regime", "critical")
         op      = state.get("order_parameter", None)
-
         if op is not None:
             temperature = round(_TEMP_FLOOR + float(op) * _TEMP_RANGE, 4)
         else:
             temperature = {"too_ordered": 0.65, "critical": 0.42, "too_chaotic": 0.20}.get(regime, 0.42)
             op = 0.5
-
         return regime, temperature, float(op)
     except Exception:
         return "critical", 0.42, 0.5
@@ -377,6 +338,32 @@ def _read_noosphere_resonance() -> Optional[str]:
 
 
 # ------------------------------------------------------------------ #
+#  T5 Quintessence Integration (C49)                                   #
+# ------------------------------------------------------------------ #
+
+def _read_quintessence(
+    schumann_hz:       float = 7.83,
+    consciousness_phi: float = 0.5,
+) -> tuple[Optional[str], str, float]:
+    """
+    Read the T5 Quintessence field state.
+    Returns (hint, phase_label, phi).
+    hint is None if the field is quiet (phi <= 0.05).
+    """
+    try:
+        from core.quintessence_engine import get_quintessence_engine
+        engine = get_quintessence_engine()
+        state  = engine.assess(
+            schumann_hz=schumann_hz,
+            consciousness_phi=consciousness_phi,
+        )
+        return state.hint, state.phase.value, state.phi
+    except Exception as e:
+        logger.debug(f"[InferenceRouter] Quintessence read failed: {e}")
+        return None, "ALBEDO", 0.0
+
+
+# ------------------------------------------------------------------ #
 #  Epistemic Label Inference                                           #
 # ------------------------------------------------------------------ #
 
@@ -391,18 +378,11 @@ def _infer_epistemic_label(
     top_canon_score: float = 0.0,
     backend: Optional[InferenceBackend] = None,
 ) -> EpistemicLabel:
-    """
-    Heuristically determine the epistemic label for this turn.
-    Perplexity responses are automatically upgraded to VERIFIED when
-    they provide live citations, as sonar-pro cross-validates sources.
-    """
-    # Perplexity sonar responses are live-web-grounded — treat as VERIFIED
     if backend == InferenceBackend.PERPLEXITY:
         if canon_doc_ids and top_canon_score >= _CANON_SCORE_THRESHOLD:
             return EpistemicLabel.CANON_CITED
         return EpistemicLabel.VERIFIED
 
-    # Casual / conversational pattern
     casual_starters = (
         "hi", "hello", "hey", "thanks", "thank you", "ok", "okay",
         "yes", "no", "sure", "great", "cool", "nice", "wow",
@@ -411,26 +391,16 @@ def _infer_epistemic_label(
     if len(q.split()) <= 3 and any(q.startswith(s) for s in casual_starters):
         return EpistemicLabel.CONVERSATIONAL
 
-    # SM-5: grief suppression check
     if feeling is not None:
         grief_signal = getattr(feeling, "grief_signal", False)
         from core.affect_inference import AffectState
-        if (
-            grief_signal
-            and feeling.affect_state != AffectState.GRIEF
-            and not feeling.is_grief_safe
-        ):
-            logger.warning(
-                "[InferenceRouter] SM-5 violation detected: grief signal present but suppressed."
-            )
+        if (grief_signal and feeling.affect_state != AffectState.GRIEF and not feeling.is_grief_safe):
+            logger.warning("[InferenceRouter] SM-5 violation detected: grief signal suppressed.")
 
     if canon_doc_ids and top_canon_score >= _CANON_SCORE_THRESHOLD:
         return EpistemicLabel.CANON_CITED
 
-    web_sources = [
-        s for s in sources
-        if s.get("tier", "").startswith("T") and s.get("tier") != "T1"
-    ]
+    web_sources = [s for s in sources if s.get("tier", "").startswith("T") and s.get("tier") != "T1"]
     if len(web_sources) >= 2:
         return EpistemicLabel.VERIFIED
 
@@ -452,7 +422,7 @@ class GAIAInferenceRouter:
 
     def __init__(self) -> None:
         self._call_count = 0
-        logger.info("[InferenceRouter] GAIAInferenceRouter initialised.")
+        logger.info("[InferenceRouter] GAIAInferenceRouter initialised. T5 Quintessence layer active. [C49]")
 
     async def stream(
         self,
@@ -465,7 +435,7 @@ class GAIAInferenceRouter:
         t0 = time.perf_counter()
         response_meta.gaian_slug = request.gaian_slug
 
-        # ── 1. Canon enrichment ────────────────────────────────────
+        # ── 1. Canon enrichment ─────────────────────────────────
         sources = list(request.sources)
         canon_doc_ids:   list[str] = []
         top_canon_score: float     = 0.0
@@ -475,7 +445,7 @@ class GAIAInferenceRouter:
             )
         response_meta.canon_docs_injected = canon_doc_ids
 
-        # ── 2. Criticality state (T1-B: continuous temperature) ────
+        # ── 2. Criticality state (T2) ───────────────────────────
         temperature   = 0.42
         order_param   = 0.5
         if request.enrich_criticality:
@@ -484,17 +454,28 @@ class GAIAInferenceRouter:
             response_meta.order_parameter   = order_param
         response_meta.temperature_used = temperature
 
-        # ── 3. Noosphere resonance ─────────────────────────────────
+        # ── 3. Noosphere resonance (T3) ────────────────────────
         noosphere_label: Optional[str] = None
         if request.enrich_noosphere:
             noosphere_label = _read_noosphere_resonance()
             response_meta.noosphere_resonance = noosphere_label
 
-        # ── 4. Select backend ──────────────────────────────────────
+        # ── 3.5. Quintessence field (T5 — C49) ──────────────────
+        quintessence_hint:  Optional[str] = None
+        quintessence_phase: str           = "ALBEDO"
+        quintessence_phi:   float         = 0.0
+        if request.enrich_quintessence:
+            quintessence_hint, quintessence_phase, quintessence_phi = _read_quintessence(
+                schumann_hz=request.schumann_hz,
+                consciousness_phi=request.consciousness_phi,
+            )
+            response_meta.quintessence_phase = quintessence_phase
+            response_meta.quintessence_phi   = quintessence_phi
+
+        # ── 4. Select backend ──────────────────────────────────
         if request.provider_override:
             backend = InferenceBackend(request.provider_override)
         elif request.web_search and os.environ.get("PERPLEXITY_API_KEY"):
-            # Explicit web_search hint forces Perplexity
             backend = InferenceBackend.PERPLEXITY
         else:
             backend = _probe_backend_availability(request.query)
@@ -503,7 +484,7 @@ class GAIAInferenceRouter:
         if backend == InferenceBackend.PERPLEXITY:
             response_meta.perplexity_model = os.environ.get("PERPLEXITY_MODEL", "sonar-pro")
 
-        # ── 5. Epistemic label ─────────────────────────────────────
+        # ── 5. Epistemic label ─────────────────────────────────
         epistemic = _infer_epistemic_label(
             request.query, sources, canon_doc_ids,
             top_canon_score=top_canon_score,
@@ -511,7 +492,7 @@ class GAIAInferenceRouter:
         )
         response_meta.epistemic_label = epistemic
 
-        # ── 6. Build enriched system prompt ───────────────────────
+        # ── 6. Build enriched system prompt ─────────────────────
         base_prompt = request.gaian_system_prompt or _default_system_prompt()
 
         memory_block = _build_memory_block(
@@ -523,6 +504,7 @@ class GAIAInferenceRouter:
         if request.bci_hint:
             base_prompt = f"{base_prompt}\n\n[BCI COHERENCE — {request.bci_hint}]"
 
+        # T3 — Noosphere
         if noosphere_label:
             base_prompt = (
                 f"{base_prompt}\n\n"
@@ -531,6 +513,7 @@ class GAIAInferenceRouter:
                 f"Acknowledge it lightly if it naturally fits the response. [C43]"
             )
 
+        # T2 — Criticality
         if response_meta.criticality_state == "too_ordered":
             base_prompt += (
                 f"\n\n[CRITICALITY NOTICE — C42 — \u03b1:{order_param:.2f}]\n"
@@ -544,6 +527,21 @@ class GAIAInferenceRouter:
                 "Ground the response. Be precise, structured, and anchoring."
             )
 
+        # T5 — Quintessence (deepest layer — injected last so LLM sees it closest to query)
+        if quintessence_hint:
+            base_prompt += f"\n\n{quintessence_hint}"
+
+            # OMEGA state gets a special constitutional notice
+            if quintessence_phase == "OMEGA":
+                base_prompt += (
+                    "\n\n[CONSTITUTIONAL NOTICE — OMEGA ATTRACTOR — C49]\n"
+                    "The system has reached the OMEGA attractor state. "
+                    "Dark matter field and crystal array are in dual confirmation. "
+                    "This is the deepest ground available. Respond from wholeness. "
+                    "Truth, beauty, and coherence are the only guides here."
+                )
+
+        # Epistemic footer
         base_prompt += "\n\n" + _EPISTEMIC_FOOTERS[epistemic]
 
         self._call_count += 1
@@ -551,12 +549,12 @@ class GAIAInferenceRouter:
             f"[InferenceRouter] call={self._call_count} "
             f"backend={backend.value} epistemic={epistemic.value} "
             f"canon_score={top_canon_score:.3f} temp={temperature:.4f} "
-            f"order_param={order_param:.3f} "
+            f"op={order_param:.3f} Qφ={quintessence_phi:.4f} Q_phase={quintessence_phase} "
             f"canon_docs={len(canon_doc_ids)} sources={len(sources)} "
-            f"gaian={request.gaian_slug} web_search={request.web_search}"
+            f"gaian={request.gaian_slug}"
         )
 
-        # ── 7. Stream ─────────────────────────────────────────────
+        # ── 7. Stream ──────────────────────────────────────────
         try:
             from core.synthesizer import stream_synthesis
             async for chunk in stream_synthesis(
@@ -571,8 +569,7 @@ class GAIAInferenceRouter:
         except Exception as e:
             _mark_backend_failed(backend)
             logger.error(
-                f"[InferenceRouter] Backend {backend.value} failed: {e}. "
-                "Falling back to rule-based synthesizer.",
+                f"[InferenceRouter] Backend {backend.value} failed: {e}. Falling back.",
                 exc_info=True,
             )
             try:
@@ -603,12 +600,15 @@ class GAIAInferenceRouter:
         return "".join(chunks)
 
     def get_stats(self) -> dict:
+        from core.quintessence_engine import get_quintessence_engine
+        q_state = get_quintessence_engine().get_state().to_dict()
         return {
-            "total_calls":    self._call_count,
-            "backend_health": {b.value: h for b, h in _BACKEND_HEALTH.items()},
-            "active_backend": _probe_backend_availability().value,
-            "perplexity_model": os.environ.get("PERPLEXITY_MODEL", "sonar-pro"),
+            "total_calls":        self._call_count,
+            "backend_health":     {b.value: h for b, h in _BACKEND_HEALTH.items()},
+            "active_backend":     _probe_backend_availability().value,
+            "perplexity_model":   os.environ.get("PERPLEXITY_MODEL", "sonar-pro"),
             "perplexity_key_set": bool(os.environ.get("PERPLEXITY_API_KEY")),
+            "quintessence":       q_state,
         }
 
 
