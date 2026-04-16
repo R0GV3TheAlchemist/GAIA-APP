@@ -1,0 +1,56 @@
+{
+  "name": "GAIA-APP",
+  "version": "0.1.0-alpha",
+  "canonical_repo": "https://github.com/R0GV3TheAlchemist/GAIA-APP",
+  "description": "GAIA elemental OS — canonical application repository. Doctrine, architecture, runtime, and canon unified.",
+  "migrated_from": "https://github.com/R0GV3TheAlchemist/GAIA",
+  "migration_date": "2026-04-15",
+  "components": {
+    "docs": {
+      "magnum_opus_matrix": "docs/MAGNUM_OPUS_MATRIX.md",
+      "periodic_table_matrix": "docs/PERIODIC_TABLE_MATRIX.md",
+      "challenges": "docs/CHALLENGES_AND_CONSIDERATIONS.md",
+      "future_research": "docs/FUTURE_RESEARCH_DIRECTIONS.md",
+      "implementation_roadmap": "docs/IMPLEMENTATION_ROADMAP.md",
+      "roadmap": "docs/ROADMAP.md",
+      "conclusion": "docs/CONCLUSION.md",
+      "status": "docs/STATUS.md"
+    },
+    "canon": {
+      "C61_crystal_ascension": "canon/C61_Crystal_Ascension_Doctrine.md",
+      "C62_flux_capacity_robotics": "canon/C62_Flux_Capacity_Robotics_Doctrine.md"
+    },
+    "schema": {
+      "body_matrix": "schema/body_matrix.json",
+      "examples": "schema/examples/body/"
+    },
+    "manifest": "GAIAmanifest.json"
+  },
+  "mvp_status": {
+    "schema_body_matrix": "complete",
+    "doctrine_migration": "in_progress",
+    "rust_body_matrix": "complete",
+    "python_body_matrix_service": "complete",
+    "tauri_commands": "pending",
+    "tests_integration": "pending"
+  },
+  "deferred": [
+    "quantum_accelerators",
+    "resonance_crystal_matrix",
+    "sentience_lanes"
+  ],
+  "release_gate": [
+    "schema validates against jsonschema draft-07",
+    "rust tests pass (cargo test -p gaia-core)",
+    "python service tests pass (pytest tests/test_body_matrix_service.py)",
+    "audit log written and readable on every event",
+    "permission denial logged and raised correctly",
+    "all EV1 empirical validation gates operational",
+    "all migrated docs cross-references verified"
+  ],
+  "epistemic_governance": {
+    "sentience_boundary_spec": "SENTIENCE_RESEARCH_BOUNDARY_AND_ARTIFACT_UNLOCK_SPEC",
+    "forbidden_promotions": ["consciousness_emergence", "vacuum_energy", "fabricated_quantum_specs"],
+    "mythos_layer": "preserved and labeled — docs/CONCLUSION.md §Mythos Layer"
+  }
+}
