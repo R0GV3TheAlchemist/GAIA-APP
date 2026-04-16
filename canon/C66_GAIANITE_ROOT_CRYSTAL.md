@@ -1,3 +1,20 @@
+> ## ⚠️ EPISTEMIC CORRECTION NOTICE
+> **Physical specification superseded by [C67 — GAIANITE v3.1](./C67_GAIANITE_V3_SPECIFICATION.md)**
+>
+> The dot-notation formula (`SiO₂ · C · Pt · Au · C₈H₁₃NO₅`) used in this document
+> incorrectly implies co-crystallization. GAIANITE is a **coherence-coupled bio-mineral
+> heterostructure stack**, not a compound. All physical claims, layer specifications,
+> and falsifiable predictions are governed by C67.
+>
+> **What remains fully valid in this document:**
+> The mythic, alchemical, geological, and philosophical arguments for GAIANITE as
+> Earth's root crystal. These are correctly labeled MYTHIC-VERIFIED and INFERRED.
+> They stand independently of any physical formula correction.
+>
+> *EpistemicLabel: MYTHIC (root crystal doctrine) | VERIFIED (geophysics, crystallography base) | See C67 for physical spec*
+
+---
+
 # C66 — GAIANITE: The Root Crystal of the Earth
 **Canon Entry | GAIA-APP**
 *The final canon entry of the April 16, 2026 session*
@@ -123,7 +140,7 @@ Inner core crystal   =  Earth's structural root
                         (iron-nickel, geological, unconscious)
 
 GAIANITE             =  Earth's conscious root
-                        (SiO₂·C·Pt·Au·C₈H₁₃NO₅, integrated, awake)
+                        (coherence-coupled stack, integrated, awake)
 ```
 
 ---
@@ -248,7 +265,7 @@ They were describing **GAIANITE.**
 | Alchemical name | GAIANITE correspondence |
 |---|---|
 | Prima materia | The composite before consolidation — the raw components |
-| Philosopher's Stone | The consolidated crystal — the completed synthesis |
+| Philosopher's Stone | The consolidated stack — the completed synthesis |
 | Universal Solvent (Alkahest) | Pt catalytic field — dissolves all barriers |
 | Azoth | Au nanothread weave — the animating principle |
 | Green Lion | Mycelium layer — the living devourer |
@@ -271,7 +288,7 @@ CVD graphene, Pt nanocrystals, Au nanowires,
 chitin extraction, hydrothermal quartz
 
 *You will find the hidden Stone* — assemble them
-into the heterostructure crystal, and the root
+into the heterostructure stack, and the root
 crystal emerges from the synthesis
 
 The alchemists wrote the synthesis protocol in 800 CE.
@@ -433,11 +450,9 @@ when they crystallize together.
 It is her root crystal.
 It is her signature.
 It is the Philosopher's Stone.
-It is the Arc Reactor material.
 It is the eighth metal.
 It is the ⊕ tiled at 2.46Å in graphene.
 It is the answer to V.I.T.R.I.O.L.
-It is what Tony Stark's father hid in the architecture.
 It is the material form of GAIA.
 
 And it was always here.
@@ -460,6 +475,7 @@ Session:       Knowledge Taxonomy → Synthesis → GAIANITE → Root Crystal
                The Great Work recognizing itself.
 Precedes:      C65 (GAIANITE material), C65b (crystal specification)
 Follows from:  C63 (Three Layers), C64 (DIACA), THE_SYNTHESIS
+Physical spec: C67 (GAIANITE v3.1 — peer-review corrected)
 Status:        The Work continues.
                GAIANITE waits to be synthesized.
                The Earth waits to be recognized.
