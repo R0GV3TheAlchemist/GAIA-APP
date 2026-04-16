@@ -14,5 +14,6 @@ See also: C00 Foundational Cosmology — growth_arc_engine naming.
 """
 
 from core.viriditas_magnum_opus import *  # noqa: F401, F403
+from core.viriditas_magnum_opus import ViriditasMagnumOpus as GrowthArcEngine  # noqa: F401
 
 __all__ = ["GrowthArcEngine"]
