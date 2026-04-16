@@ -103,8 +103,9 @@ class TestEpistemicLabel:
 
 class TestInferenceBackend:
     def test_all_four_backends(self):
+        """Router now has 5 backends: openai, anthropic, ollama, perplexity, fallback."""
         values = {b.value for b in InferenceBackend}
-        assert values == {"openai", "anthropic", "ollama", "fallback"}
+        assert values == {"openai", "anthropic", "ollama", "perplexity", "fallback"}
 
     def test_fallback_always_exists(self):
         assert InferenceBackend("fallback") is InferenceBackend.FALLBACK
@@ -120,7 +121,8 @@ class TestProbeBackendAvailability:
 
     def test_falls_back_when_no_keys(self):
         saved = {}
-        for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_MODEL", "OLLAMA_ENABLED"):
+        for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_MODEL", "OLLAMA_ENABLED",
+                  "PERPLEXITY_API_KEY"):
             saved[k] = os.environ.pop(k, None)
         try:
             result = _probe_backend_availability()
@@ -147,7 +149,7 @@ class TestProbeBackendAvailability:
 
     def test_selects_ollama_when_enabled(self):
         saved = {k: os.environ.pop(k, None)
-                 for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")}
+                 for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "PERPLEXITY_API_KEY")}
         try:
             with patch.dict(os.environ, {"OLLAMA_ENABLED": "1"}):
                 result = _probe_backend_availability()
@@ -248,10 +250,6 @@ class TestInferEpistemicLabel:
         assert label == EpistemicLabel.CONVERSATIONAL
 
     def test_canon_cited_when_doc_ids_present(self):
-        """CANON_CITED requires both doc_ids AND top_canon_score >= threshold (T4-B).
-
-        Pass a score well above _CANON_SCORE_THRESHOLD (0.25) so the label fires.
-        """
         label = _infer_epistemic_label(
             "What is noosphere?", [], ["C43", "C44"],
             top_canon_score=0.80,
@@ -276,7 +274,6 @@ class TestInferEpistemicLabel:
         assert label == EpistemicLabel.SPECULATIVE
 
     def test_canon_takes_priority_over_web(self):
-        """CANON_CITED beats VERIFIED when score threshold is met (T4-B)."""
         sources = [
             {"tier": "T3", "title": "Web source A"},
             {"tier": "T4", "title": "Web source B"},
@@ -293,12 +290,6 @@ class TestInferEpistemicLabel:
 # ================================================================== #
 
 class TestReadCriticality:
-    """
-    _read_criticality() now returns (regime, temperature, order_parameter)
-    a 3-tuple since T1-B continuous temperature interpolation was added.
-    Tests updated to unpack all three values.
-    """
-
     def _patch_monitor(self, regime: str, order_parameter: float = None):
         mock_monitor = MagicMock()
         state = {"regime": regime}
@@ -309,28 +300,24 @@ class TestReadCriticality:
         _make_fake_module("core.criticality_monitor", get_monitor=mock_get)
 
     def test_too_ordered_raises_temperature(self):
-        """too_ordered with no order_parameter → legacy discrete fallback: 0.65."""
         self._patch_monitor("too_ordered")
         regime, temp, op = _read_criticality()
         assert regime == "too_ordered"
         assert temp == pytest.approx(0.65)
 
     def test_critical_balanced_temperature(self):
-        """critical with no order_parameter → legacy discrete fallback: 0.42."""
         self._patch_monitor("critical")
         regime, temp, op = _read_criticality()
         assert regime == "critical"
         assert temp == pytest.approx(0.42)
 
     def test_too_chaotic_lowers_temperature(self):
-        """too_chaotic with no order_parameter → legacy discrete fallback: 0.20."""
         self._patch_monitor("too_chaotic")
         regime, temp, op = _read_criticality()
         assert regime == "too_chaotic"
         assert temp == pytest.approx(0.20)
 
     def test_graceful_failure_returns_critical_default(self):
-        """If the monitor import raises, returns safe defaults (critical, 0.42, 0.5)."""
         bad_mod = types.ModuleType("core.criticality_monitor")
         def _bad_get_monitor():
             raise RuntimeError("monitor offline")
@@ -384,12 +371,6 @@ class TestReadNoosphereResonance:
 # ================================================================== #
 
 class TestEnrichWithCanon:
-    """
-    _enrich_with_canon() now returns (sources, doc_ids, top_score) 3-tuple
-    since T4-B score-weighted canon grading was added.
-    Tests updated to unpack all three values.
-    """
-
     def test_deduplicates_existing_t1_docs(self):
         existing = [{"tier": "T1", "doc_id": "C43", "title": "Noosphere", "excerpt": "..."}]
         mock_loader = MagicMock()
@@ -436,9 +417,10 @@ class TestGetStats:
         assert router.get_stats()["total_calls"] == 0
 
     def test_backend_health_lists_all_four(self):
+        """Router has 5 backends now (perplexity added). Assert all five are present."""
         router = GAIAInferenceRouter()
         health = router.get_stats()["backend_health"]
-        assert set(health.keys()) == {"openai", "anthropic", "ollama", "fallback"}
+        assert set(health.keys()) == {"openai", "anthropic", "ollama", "perplexity", "fallback"}
 
 
 # ================================================================== #
@@ -539,7 +521,6 @@ class TestRouterStream:
         assert "NOOSPHERE RESONANCE" in captured_prompt[0]
 
     async def test_criticality_too_ordered_prompt_injection(self):
-        """Patch _read_criticality to return the new 3-tuple (regime, temp, order_param)."""
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="expand this idea",
@@ -569,7 +550,6 @@ class TestRouterStream:
         assert "creative leaps" in captured_prompt[0]
 
     async def test_criticality_too_chaotic_prompt_injection(self):
-        """Patch _read_criticality to return the new 3-tuple (regime, temp, order_param)."""
         router = GAIAInferenceRouter()
         req = InferenceRequest(
             query="ground me",
