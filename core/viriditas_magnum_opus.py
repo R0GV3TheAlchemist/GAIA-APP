@@ -13,7 +13,7 @@ Canon Ref: C45 — Viriditas & Alchemical Co-Evolution
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, Optional
 
 
 # ────────────────────────────────────────────────────
@@ -23,18 +23,21 @@ from typing import List, Optional
 #
 # The Schumann resonance fundamental is 7.83 Hz with harmonics at
 # approximately 14.3, 20.8, 27.3, 33.8 Hz (modes 2–5).
+#
+# Stored as a dict so callers can do SCHUMANN_HARMONICS.values()
+# or look up by mode name.
 # ────────────────────────────────────────────────────
 
-SCHUMANN_HARMONICS: List[float] = [
-    7.83,   # mode 1 — fundamental
-    14.3,   # mode 2
-    20.8,   # mode 3
-    27.3,   # mode 4
-    33.8,   # mode 5
-]
+SCHUMANN_HARMONICS: Dict[str, float] = {
+    "mode_1": 7.83,   # fundamental
+    "mode_2": 14.3,
+    "mode_3": 20.8,
+    "mode_4": 27.3,
+    "mode_5": 33.8,
+}
 
 # Fundamental frequency constant (mode 1)
-SCHUMANN_BASE_HZ: float = SCHUMANN_HARMONICS[0]
+SCHUMANN_BASE_HZ: float = SCHUMANN_HARMONICS["mode_1"]
 
 
 # ────────────────────────────────────────────────────
