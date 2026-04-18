@@ -110,6 +110,9 @@ class GAIAEvent(str, Enum):
     CANON_LOADED        = "canon.loaded"
     CANON_SEARCH        = "canon.search"
 
+    # Consent  (C43 §5 — All collective participation is opt-in only)
+    CONSENT_UPDATED     = "consent.updated"
+
     # Errors
     ERROR               = "error.generic"
     UNHANDLED_EXCEPTION = "error.unhandled"
@@ -136,7 +139,6 @@ class _JSONFormatter(logging.Formatter):
             "correlation_id": correlation_id_ctx.get("-"),
             "message":        record.getMessage(),
         }
-        # Merge any extra fields passed via extra={...}
         for key, val in record.__dict__.items():
             if key in (
                 "name", "msg", "args", "levelname", "levelno", "pathname",
@@ -164,11 +166,11 @@ class _JSONFormatter(logging.Formatter):
 # ------------------------------------------------------------------ #
 
 _COLOURS = {
-    "DEBUG":    "\033[36m",   # cyan
-    "INFO":     "\033[32m",   # green
-    "WARNING":  "\033[33m",   # yellow
-    "ERROR":    "\033[31m",   # red
-    "CRITICAL": "\033[35m",   # magenta
+    "DEBUG":    "\033[36m",
+    "INFO":     "\033[32m",
+    "WARNING":  "\033[33m",
+    "ERROR":    "\033[31m",
+    "CRITICAL": "\033[35m",
 }
 _RESET = "\033[0m"
 
@@ -203,8 +205,6 @@ def _configure_root() -> None:
 
     root = logging.getLogger()
     root.setLevel(getattr(logging, _LOG_LEVEL, logging.INFO))
-
-    # Remove any handlers added by basicConfig
     root.handlers.clear()
 
     handler = logging.StreamHandler(sys.stdout)
@@ -213,16 +213,11 @@ def _configure_root() -> None:
     )
     root.addHandler(handler)
 
-    # Quiet noisy third-party loggers
     for noisy in ("uvicorn.access", "watchfiles", "httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def get_logger(name: str) -> logging.Logger:
-    """
-    Return a named logger using the GAIA structured format.
-    Call once at module level: logger = get_logger(__name__)
-    """
     _configure_root()
     return logging.getLogger(name)
 
@@ -242,17 +237,6 @@ def log_event(
     user_id:        Optional[str] = None,
     **kwargs: Any,
 ) -> None:
-    """
-    Emit a single structured log entry for a canonical GAIA event.
-
-    Args:
-        event:    GAIAEvent enum value (e.g. GAIAEvent.GAIAN_BORN)
-        level:    logging level (default INFO)
-        message:  human-readable summary
-        gaian:    GAIAN slug (optional)
-        user_id:  authenticated user ID (optional)
-        **kwargs: any extra fields to include in the log entry
-    """
     global _event_logger
     if _event_logger is None:
         _event_logger = get_logger("gaia.events")
@@ -272,13 +256,6 @@ def log_event(
 # ------------------------------------------------------------------ #
 
 class LoggingMiddleware(BaseHTTPMiddleware):
-    """
-    Stamps every incoming request with a correlation ID.
-    Logs: method, path, status_code, duration_ms.
-    The correlation ID is available via correlation_id_ctx throughout
-    the entire async call chain for that request.
-    """
-
     def __init__(self, app, service_name: str = _SERVICE):
         super().__init__(app)
         self._service = service_name
@@ -326,6 +303,5 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             },
         )
 
-        # Return correlation ID to client for debugging
         response.headers["X-Correlation-ID"] = cid
         return response
