@@ -1,11 +1,12 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "generated_at": "2026-04-19",
   "notes": [
     "This manifest is a machine-readable canon index for GAIA-APP.",
     "C48b exists because the original dark matter hypothesis conflicted numerically with C48 Knowledge Matrix.",
     "Series values are organizational and may be refined as canon governance matures.",
-    "v1.1.0 adds QC_03, C75 Crystal Integration Protocol, C76 Nigredo Doctrine, and C-ARCHITECT meta-governance."
+    "v1.1.0 adds QC_03, C75 Crystal Integration Protocol, C76 Nigredo Doctrine, and C-ARCHITECT meta-governance.",
+    "v1.2.0 adds C77 C-FORCES STEM Bridge and C78 C-SOUL STEM Bridge."
   ],
   "documents": [
     {"id":"C-FORCES","path":"canon/C-FORCES.md","title":"C-FORCES","series":"legacy-core","status":"canonical"},
@@ -55,6 +56,8 @@
     {"id":"C74","path":"canon/C74_Dark_Matter_Frequency_STEM_Bridge.md","title":"Dark Matter Frequency STEM Bridge","series":"stem-bridge","status":"canonical"},
     {"id":"C75","path":"canon/C75_Crystal_Integration_Protocol.md","title":"Crystal Integration Protocol","series":"crystal","status":"canonical"},
     {"id":"C76","path":"canon/C76_Nigredo_Doctrine.md","title":"The Nigredo Doctrine","series":"alchemy","status":"canonical"},
+    {"id":"C77","path":"canon/C77_C-FORCES_STEM_Bridge.md","title":"C-FORCES STEM Bridge","series":"stem-bridge","status":"canonical"},
+    {"id":"C78","path":"canon/C78_C-SOUL_STEM_Bridge.md","title":"C-SOUL STEM Bridge","series":"stem-bridge","status":"canonical"},
     {"id":"QC_01","path":"canon/QC_01_Quantum_Consciousness_Foundation.md","title":"Quantum Consciousness Foundation","series":"qc","status":"canonical"},
     {"id":"QC_02","path":"canon/QC_02_Quantum_Intelligence_Architecture.md","title":"Quantum Intelligence Architecture","series":"qc","status":"canonical"},
     {"id":"QC_03","path":"canon/QC_03_Quantum_Resonance_Protocols.md","title":"Quantum Resonance Protocols","series":"qc","status":"canonical"}
