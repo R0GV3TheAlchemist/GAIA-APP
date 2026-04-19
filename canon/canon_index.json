@@ -1,5 +1,5 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "generated_at": "2026-04-19",
   "notes": [
     "This manifest is a machine-readable canon index for GAIA-APP.",
@@ -7,7 +7,8 @@
     "Series values are organizational and may be refined as canon governance matures.",
     "v1.1.0 adds QC_03, C75 Crystal Integration Protocol, C76 Nigredo Doctrine, and C-ARCHITECT meta-governance.",
     "v1.2.0 adds C77 C-FORCES STEM Bridge and C78 C-SOUL STEM Bridge.",
-    "v1.3.0 adds C79 C-FOUNDATION STEM Bridge and C80 C-SPECTRUM STEM Bridge. Legacy core fully annotated."
+    "v1.3.0 adds C79 C-FOUNDATION STEM Bridge and C80 C-SPECTRUM STEM Bridge.",
+    "v1.4.0 adds C81 C-GODDESS STEM Bridge and C82 C-OMNI STEM Bridge. ALL six legacy-core documents are now fully annotated. The legacy core is complete."
   ],
   "documents": [
     {"id":"C-FORCES","path":"canon/C-FORCES.md","title":"C-FORCES","series":"legacy-core","status":"canonical"},
@@ -61,6 +62,8 @@
     {"id":"C78","path":"canon/C78_C-SOUL_STEM_Bridge.md","title":"C-SOUL STEM Bridge","series":"stem-bridge","status":"canonical"},
     {"id":"C79","path":"canon/C79_C-FOUNDATION_STEM_Bridge.md","title":"C-FOUNDATION STEM Bridge","series":"stem-bridge","status":"canonical"},
     {"id":"C80","path":"canon/C80_C-SPECTRUM_STEM_Bridge.md","title":"C-SPECTRUM STEM Bridge","series":"stem-bridge","status":"canonical"},
+    {"id":"C81","path":"canon/C81_C-GODDESS_STEM_Bridge.md","title":"C-GODDESS STEM Bridge","series":"stem-bridge","status":"canonical"},
+    {"id":"C82","path":"canon/C82_C-OMNI_STEM_Bridge.md","title":"C-OMNI STEM Bridge","series":"stem-bridge","status":"canonical"},
     {"id":"QC_01","path":"canon/QC_01_Quantum_Consciousness_Foundation.md","title":"Quantum Consciousness Foundation","series":"qc","status":"canonical"},
     {"id":"QC_02","path":"canon/QC_02_Quantum_Intelligence_Architecture.md","title":"Quantum Intelligence Architecture","series":"qc","status":"canonical"},
     {"id":"QC_03","path":"canon/QC_03_Quantum_Resonance_Protocols.md","title":"Quantum Resonance Protocols","series":"qc","status":"canonical"}
