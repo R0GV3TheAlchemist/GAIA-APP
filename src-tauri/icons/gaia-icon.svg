@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0d2f32"/>
+      <stop offset="100%" stop-color="#050e0f"/>
+    </radialGradient>
+    <radialGradient id="coreGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4fc8d0"/>
+      <stop offset="60%" stop-color="#01696f"/>
+      <stop offset="100%" stop-color="#01696f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4fc8d0" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#4fc8d0" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softglow">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="circle">
+      <circle cx="256" cy="256" r="240"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <circle cx="256" cy="256" r="256" fill="url(#bgGrad)"/>
+
+  <!-- Outer ring -->
+  <circle cx="256" cy="256" r="230" stroke="#01696f" stroke-width="1.5" stroke-opacity="0.4" fill="none"/>
+  <circle cx="256" cy="256" r="210" stroke="#01696f" stroke-width="0.8" stroke-opacity="0.2" fill="none"/>
+
+  <!-- Orbital rings -->
+  <ellipse cx="256" cy="256" rx="200" ry="60" stroke="#4fc8d0" stroke-width="1.2" stroke-opacity="0.5" fill="none" transform="rotate(-30 256 256)"/>
+  <ellipse cx="256" cy="256" rx="200" ry="60" stroke="#4fc8d0" stroke-width="1.2" stroke-opacity="0.5" fill="none" transform="rotate(30 256 256)"/>
+  <ellipse cx="256" cy="256" rx="200" ry="60" stroke="#4fc8d0" stroke-width="1.2" stroke-opacity="0.3" fill="none" transform="rotate(90 256 256)"/>
+
+  <!-- Latitude lines -->
+  <ellipse cx="256" cy="256" rx="140" ry="42" stroke="#4fc8d0" stroke-width="0.8" stroke-opacity="0.25" fill="none"/>
+  <ellipse cx="256" cy="220" rx="115" ry="28" stroke="#4fc8d0" stroke-width="0.8" stroke-opacity="0.2" fill="none"/>
+  <ellipse cx="256" cy="292" rx="115" ry="28" stroke="#4fc8d0" stroke-width="0.8" stroke-opacity="0.2" fill="none"/>
+
+  <!-- Globe body -->
+  <circle cx="256" cy="256" r="140" fill="#010d0e" filter="url(#softglow)"/>
+  <circle cx="256" cy="256" r="140" stroke="#01696f" stroke-width="2" stroke-opacity="0.8" fill="none"/>
+
+  <!-- Globe glow -->
+  <circle cx="256" cy="256" r="140" fill="url(#glowGrad)"/>
+
+  <!-- Longitude lines -->
+  <line x1="256" y1="116" x2="256" y2="396" stroke="#4fc8d0" stroke-width="0.8" stroke-opacity="0.3" clip-path="url(#circle)"/>
+  <line x1="116" y1="256" x2="396" y2="256" stroke="#4fc8d0" stroke-width="0.8" stroke-opacity="0.3" clip-path="url(#circle)"/>
+
+  <!-- Node dots -->
+  <circle cx="456" cy="256" r="5" fill="#4fc8d0" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="56"  cy="256" r="5" fill="#4fc8d0" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="356" cy="90"  r="4" fill="#4fc8d0" filter="url(#glow)" opacity="0.7"/>
+  <circle cx="156" cy="422" r="4" fill="#4fc8d0" filter="url(#glow)" opacity="0.7"/>
+  <circle cx="356" cy="422" r="4" fill="#4fc8d0" filter="url(#glow)" opacity="0.7"/>
+  <circle cx="156" cy="90"  r="4" fill="#4fc8d0" filter="url(#glow)" opacity="0.7"/>
+
+  <!-- Core pulse -->
+  <circle cx="256" cy="256" r="38" fill="url(#coreGrad)" filter="url(#softglow)"/>
+  <circle cx="256" cy="256" r="22" fill="#4fc8d0" opacity="0.9" filter="url(#glow)"/>
+  <circle cx="256" cy="256" r="10" fill="#e0f7f8"/>
+
+  <!-- Connector lines -->
+  <line x1="256" y1="256" x2="456" y2="256" stroke="#4fc8d0" stroke-width="0.6" stroke-opacity="0.2"/>
+  <line x1="256" y1="256" x2="56"  y2="256" stroke="#4fc8d0" stroke-width="0.6" stroke-opacity="0.2"/>
+  <line x1="256" y1="256" x2="356" y2="90"  stroke="#4fc8d0" stroke-width="0.6" stroke-opacity="0.2"/>
+  <line x1="256" y1="256" x2="156" y2="422" stroke="#4fc8d0" stroke-width="0.6" stroke-opacity="0.2"/>
+  <line x1="256" y1="256" x2="356" y2="422" stroke="#4fc8d0" stroke-width="0.6" stroke-opacity="0.2"/>
+  <line x1="256" y1="256" x2="156" y2="90"  stroke="#4fc8d0" stroke-width="0.6" stroke-opacity="0.2"/>
+</svg>
