@@ -37,7 +37,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-icons-v2
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -90,25 +90,12 @@ jobs:
 
           icon_dir = os.path.join('src-tauri', 'icons')
           os.makedirs(icon_dir, exist_ok=True)
-
-          # Write PNGs
-          for size, name in [(32, '32x32.png'), (128, '128x128.png'), (256, '128x128@2x.png')]:
-              path = os.path.join(icon_dir, name)
-              with open(path, 'wb') as f:
-                  f.write(make_png(size))
-              print(f'Generated {name} ({size}x{size})')
-
-          # Write icon.png
-          with open(os.path.join(icon_dir, 'icon.png'), 'wb') as f:
-              f.write(make_png(128))
-          print('Generated icon.png')
-
-          # Write icon.ico
-          with open(os.path.join(icon_dir, 'icon.ico'), 'wb') as f:
-              f.write(make_ico([16, 32, 48, 256]))
+          for size, name in [(32,'32x32.png'),(128,'128x128.png'),(256,'128x128@2x.png'),(128,'icon.png')]:
+              with open(os.path.join(icon_dir, name), 'wb') as f: f.write(make_png(size))
+              print(f'Generated {name}')
+          with open(os.path.join(icon_dir, 'icon.ico'), 'wb') as f: f.write(make_ico([16,32,48,256]))
           print('Generated icon.ico')
-
-          print('All icons generated successfully.')
+          print('All icons ready.')
 
       - name: Install Node dependencies
         run: npm ci
