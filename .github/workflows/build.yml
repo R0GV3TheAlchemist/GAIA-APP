@@ -78,15 +78,37 @@ jobs:
           if (-not (Test-Path $f)) { throw "Sidecar missing: $f" }
           Write-Host "Sidecar confirmed: $((Get-Item $f).Length) bytes"
 
-      # RC2175: icon.ico must be a real multi-size ICO, not a renamed PNG.
-      # ImageMagick is pre-installed on windows-latest — regenerate from 128x128 PNG.
-      - name: Regenerate icon.ico (fix RC2175)
+      # All small PNGs in the repo are stubs (<1 KB).
+      # Regenerate real PNGs from the SVG source, then build a valid ICO.
+      - name: Regenerate icons from SVG
         shell: pwsh
         run: |
-          $src = "src-tauri\icons\128x128.png"
-          $dst = "src-tauri\icons\icon.ico"
-          magick $src -define icon:auto-resize="256,128,96,64,48,32,16" $dst
-          Write-Host "icon.ico regenerated: $((Get-Item $dst).Length) bytes"
+          $svg = "src-tauri\icons\gaia-icon.svg"
+          $icons = "src-tauri\icons"
+
+          # Use Inkscape (pre-installed) to export real PNGs
+          $sizes = @(16, 32, 48, 64, 128, 256)
+          foreach ($s in $sizes) {
+            inkscape $svg --export-type=png --export-width=$s --export-height=$s `
+              --export-filename="$icons\icon-${s}.png"
+          }
+
+          # Overwrite stub PNGs Tauri references
+          Copy-Item "$icons\icon-32.png"  "$icons\32x32.png"  -Force
+          Copy-Item "$icons\icon-128.png" "$icons\128x128.png" -Force
+          Copy-Item "$icons\icon-256.png" "$icons\128x128@2x.png" -Force
+
+          # Build a proper multi-resolution ICO from real PNGs
+          magick `
+            "$icons\icon-16.png" `
+            "$icons\icon-32.png" `
+            "$icons\icon-48.png" `
+            "$icons\icon-64.png" `
+            "$icons\icon-128.png" `
+            "$icons\icon-256.png" `
+            "$icons\icon.ico"
+
+          Write-Host "icon.ico: $((Get-Item "$icons\icon.ico").Length) bytes"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
