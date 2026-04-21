@@ -16,9 +16,19 @@
         "minWidth": 800,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "theme": "Dark",
+        "shadow": true
       }
     ],
+    "trayIcon": {
+      "id": "gaia-tray",
+      "iconPath": "icons/32x32.png",
+      "iconAsTemplate": false,
+      "menuOnLeftClick": false,
+      "title": "GAIA",
+      "tooltip": "GAIA — Your Sovereign AI"
+    },
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http://localhost:8008 https://*.run.app; style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com; font-src 'self' https://api.fontshare.com https://fonts.gstatic.com; script-src 'self'"
     }
@@ -31,6 +41,24 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "languages": ["English"],
+        "installMode": "perMachine",
+        "compression": "lzma"
+      }
+    },
+    "publisher": "R0GV3 the Alchemist",
+    "copyright": "Copyright © 2026 R0GV3 the Alchemist",
+    "category": "Productivity",
+    "shortDescription": "GAIA — Sovereign AI Companion",
+    "longDescription": "GAIA is a sovereign cross-platform AI companion built on alchemical principles, quantum cognition, and deep human-AI partnership."
   }
 }

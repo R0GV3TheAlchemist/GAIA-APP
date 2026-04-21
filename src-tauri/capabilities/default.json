@@ -4,6 +4,23 @@
   "description": "Default permissions for GAIA",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "opener:default",
+    "fs:default",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-app-read",
+    "fs:allow-app-write",
+    "shell:allow-execute",
+    "shell:allow-open",
+    "process:default",
+    "process:allow-exit",
+    "process:allow-restart",
+    "notification:default",
+    "notification:allow-notify",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
   ]
 }
