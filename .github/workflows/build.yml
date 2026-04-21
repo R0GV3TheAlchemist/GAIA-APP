@@ -63,6 +63,9 @@ jobs:
       - name: Install Node deps
         run: npm ci
 
+      - name: Build frontend (Vite)
+        run: npm run build
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
