@@ -53,6 +53,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -78,37 +83,52 @@ jobs:
           if (-not (Test-Path $f)) { throw "Sidecar missing: $f" }
           Write-Host "Sidecar confirmed: $((Get-Item $f).Length) bytes"
 
-      # All small PNGs in the repo are stubs (<1 KB).
-      # Regenerate real PNGs from the SVG source, then build a valid ICO.
+      # Stub PNGs are invalid (<1 KB each). Use cairosvg to render real PNGs
+      # from gaia-icon.svg, then assemble a valid multi-resolution ICO.
+      - name: Install icon tools
+        run: pip install cairosvg Pillow
+
       - name: Regenerate icons from SVG
-        shell: pwsh
+        shell: python
         run: |
-          $svg = "src-tauri\icons\gaia-icon.svg"
-          $icons = "src-tauri\icons"
+          import cairosvg, struct, os
+          from PIL import Image
+          from io import BytesIO
 
-          # Use Inkscape (pre-installed) to export real PNGs
-          $sizes = @(16, 32, 48, 64, 128, 256)
-          foreach ($s in $sizes) {
-            inkscape $svg --export-type=png --export-width=$s --export-height=$s `
-              --export-filename="$icons\icon-${s}.png"
-          }
+          svg = "src-tauri/icons/gaia-icon.svg"
+          icons_dir = "src-tauri/icons"
+          sizes = [16, 32, 48, 64, 128, 256]
 
-          # Overwrite stub PNGs Tauri references
-          Copy-Item "$icons\icon-32.png"  "$icons\32x32.png"  -Force
-          Copy-Item "$icons\icon-128.png" "$icons\128x128.png" -Force
-          Copy-Item "$icons\icon-256.png" "$icons\128x128@2x.png" -Force
+          # Render each size to PNG bytes
+          pngs = {}
+          for s in sizes:
+              data = cairosvg.svg2png(url=svg, output_width=s, output_height=s)
+              pngs[s] = data
+              path = f"{icons_dir}/icon-{s}.png"
+              with open(path, "wb") as f:
+                  f.write(data)
+              print(f"  icon-{s}.png: {len(data)} bytes")
 
-          # Build a proper multi-resolution ICO from real PNGs
-          magick `
-            "$icons\icon-16.png" `
-            "$icons\icon-32.png" `
-            "$icons\icon-48.png" `
-            "$icons\icon-64.png" `
-            "$icons\icon-128.png" `
-            "$icons\icon-256.png" `
-            "$icons\icon.ico"
+          # Overwrite stub PNGs that Tauri references
+          for src, dst in [
+              (32,  "32x32.png"),
+              (128, "128x128.png"),
+              (256, "128x128@2x.png"),
+          ]:
+              with open(f"{icons_dir}/{dst}", "wb") as f:
+                  f.write(pngs[src])
+              print(f"  {dst} updated")
 
-          Write-Host "icon.ico: $((Get-Item "$icons\icon.ico").Length) bytes"
+          # Build proper ICO using Pillow
+          images = [Image.open(BytesIO(pngs[s])).convert("RGBA") for s in sizes]
+          ico_path = f"{icons_dir}/icon.ico"
+          images[0].save(
+              ico_path,
+              format="ICO",
+              sizes=[(s, s) for s in sizes],
+              append_images=images[1:],
+          )
+          print(f"  icon.ico: {os.path.getsize(ico_path)} bytes")
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
