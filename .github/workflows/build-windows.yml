@@ -37,7 +37,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-icons-v2
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-rgba-v1
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -57,24 +57,24 @@ jobs:
           }
         shell: pwsh
 
-      - name: Generate valid icons via Python
+      - name: Generate valid RGBA icons via Python
         shell: python
         run: |
           import struct, zlib, os
 
-          def make_png(size):
+          def make_rgba_png(size):
               def chunk(name, data):
                   c = name + data
                   return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
               sig = b'\x89PNG\r\n\x1a\n'
-              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
-              row = b'\x00' + bytes([10, 10, 15]) * size
+              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0))
+              row = b'\x00' + bytes([10, 10, 15, 255]) * size
               idat = chunk(b'IDAT', zlib.compress(row * size, 9))
               iend = chunk(b'IEND', b'')
               return sig + ihdr + idat + iend
 
           def make_ico(sizes):
-              images = [(s, make_png(s)) for s in sizes]
+              images = [(s, make_rgba_png(s)) for s in sizes]
               count = len(images)
               header = struct.pack('<HHH', 0, 1, count)
               data_offset = 6 + count * 16
@@ -91,8 +91,8 @@ jobs:
           icon_dir = os.path.join('src-tauri', 'icons')
           os.makedirs(icon_dir, exist_ok=True)
           for size, name in [(32,'32x32.png'),(128,'128x128.png'),(256,'128x128@2x.png'),(128,'icon.png')]:
-              with open(os.path.join(icon_dir, name), 'wb') as f: f.write(make_png(size))
-              print(f'Generated {name}')
+              with open(os.path.join(icon_dir, name), 'wb') as f: f.write(make_rgba_png(size))
+              print(f'Generated {name} ({size}x{size} RGBA)')
           with open(os.path.join(icon_dir, 'icon.ico'), 'wb') as f: f.write(make_ico([16,32,48,256]))
           print('Generated icon.ico')
           print('All icons ready.')
