@@ -1,7 +1,7 @@
 {
   "productName": "GAIA",
   "version": "0.1.0",
-  "identifier": "com.gaia.app",
+  "identifier": "com.rogve.gaia",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420"
