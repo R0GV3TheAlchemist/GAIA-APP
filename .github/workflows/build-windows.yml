@@ -57,11 +57,61 @@ jobs:
           }
         shell: pwsh
 
+      - name: Generate valid icons via Python
+        shell: python
+        run: |
+          import struct, zlib, os
+
+          def make_png(size):
+              def chunk(name, data):
+                  c = name + data
+                  return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+              sig = b'\x89PNG\r\n\x1a\n'
+              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+              row = b'\x00' + bytes([10, 10, 15]) * size
+              idat = chunk(b'IDAT', zlib.compress(row * size, 9))
+              iend = chunk(b'IEND', b'')
+              return sig + ihdr + idat + iend
+
+          def make_ico(sizes):
+              images = [(s, make_png(s)) for s in sizes]
+              count = len(images)
+              header = struct.pack('<HHH', 0, 1, count)
+              data_offset = 6 + count * 16
+              entries = b''
+              data = b''
+              for size, png in images:
+                  w = 0 if size == 256 else size
+                  h = 0 if size == 256 else size
+                  entries += struct.pack('<BBBBHHII', w, h, 0, 0, 1, 32, len(png), data_offset)
+                  data_offset += len(png)
+                  data += png
+              return header + entries + data
+
+          icon_dir = os.path.join('src-tauri', 'icons')
+          os.makedirs(icon_dir, exist_ok=True)
+
+          # Write PNGs
+          for size, name in [(32, '32x32.png'), (128, '128x128.png'), (256, '128x128@2x.png')]:
+              path = os.path.join(icon_dir, name)
+              with open(path, 'wb') as f:
+                  f.write(make_png(size))
+              print(f'Generated {name} ({size}x{size})')
+
+          # Write icon.png
+          with open(os.path.join(icon_dir, 'icon.png'), 'wb') as f:
+              f.write(make_png(128))
+          print('Generated icon.png')
+
+          # Write icon.ico
+          with open(os.path.join(icon_dir, 'icon.ico'), 'wb') as f:
+              f.write(make_ico([16, 32, 48, 256]))
+          print('Generated icon.ico')
+
+          print('All icons generated successfully.')
+
       - name: Install Node dependencies
         run: npm ci
-
-      - name: Generate icons from SVG source
-        run: npx @tauri-apps/cli icon src-tauri/icons/gaia-icon.svg
 
       - name: Build TypeScript frontend
         run: npx vite build
