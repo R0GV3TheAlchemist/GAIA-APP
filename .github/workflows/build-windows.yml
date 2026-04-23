@@ -48,17 +48,12 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      # 5. Build Python sidecar
+      # 5. Build Python sidecar using existing .spec file
       - name: Build gaia-backend sidecar (PyInstaller)
-        run: |
-          pyinstaller backend/main.py \
-            --name gaia-backend \
-            --onefile \
-            --distpath src-tauri/binaries \
-            --clean
+        run: pyinstaller gaia-backend.spec --clean
         shell: bash
 
-      # 6. Rename sidecar for Tauri target triple
+      # 6. Rename sidecar binary for Tauri target triple
       - name: Rename sidecar binary for Tauri
         run: |
           mv src-tauri/binaries/gaia-backend.exe \
