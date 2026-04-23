@@ -8,18 +8,17 @@ import './shell/Shell.css';
 import './chat/Chat.css';
 import './memory/Memory.css';
 import './noosphere/NoosphereTab.css';
-import { mountSearch }          from './search/Search';
-import { mountShell }           from './shell/Shell';
-import { mountChat }            from './chat/Chat';
-import { mountMemory }          from './memory/Memory';
-import { mountGaianChat }       from './gaian/GaianChatView';
+import { mountSearch }     from './search/Search';
+import { mountShell }      from './shell/Shell';
+import { mountChat }       from './chat/Chat';
+import { mountMemory }     from './memory/Memory';
+import { mountGaianChat }  from './gaian/GaianChatView';
 import {
   mountNoosphereTab,
   unmountNoosphereTab,
 } from './noosphere';
-import { appDataDir, join } from '@tauri-apps/api/path';
+import { appDataDir, join, resolveResource } from '@tauri-apps/api/path';
 import { exists, mkdir, copyFile, readDir } from '@tauri-apps/plugin-fs';
-import { resolveResource } from '@tauri-apps/api/path';
 
 const metaEnv = ((import.meta as unknown as { env?: Record<string, string> }).env) ?? {};
 const BASE_URL = metaEnv.VITE_API_BASE ?? 'http://localhost:8008';
@@ -46,7 +45,7 @@ async function ensureAppDataDirs(): Promise<void> {
         const canonSrc = await resolveResource('canon');
         const srcEntries = await readDir(canonSrc);
         for (const entry of srcEntries) {
-          const srcFile = await join(canonSrc, entry.name);
+          const srcFile  = await join(canonSrc,   entry.name);
           const destFile = await join(canonDest, entry.name);
           await copyFile(srcFile, destFile);
         }
