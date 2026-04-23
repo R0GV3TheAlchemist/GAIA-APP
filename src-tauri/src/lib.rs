@@ -23,7 +23,9 @@ fn get_backend_status() -> String {
 async fn restart_backend(app: tauri::AppHandle) -> Result<String, String> {
     let handle: SidecarHandle = app
         .try_state::<SidecarHandle>()
-        .ok_or("sidecar state not initialised")?;
+        .ok_or("sidecar state not initialised")?
+        .inner()
+        .clone();
 
     // Kill existing process if running
     {
