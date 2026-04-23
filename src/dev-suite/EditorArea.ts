@@ -1,7 +1,7 @@
 // GAIA Dev Suite — Editor Area (Monaco tabs)
 // Phase 4.2 — Monaco integrated with file open/save
 
-import { mountMonacoEditor, openInEditor, getEditorContent } from './MonacoEditor';
+import { mountMonacoEditor, openInEditor } from './MonacoEditor';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 
 interface EditorTab {

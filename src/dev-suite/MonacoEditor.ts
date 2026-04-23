@@ -2,9 +2,14 @@
 // Phase 4.2 — Full editor integration
 // Loaded lazily via CDN on first use
 
-declare const monaco: any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MonacoInstance = any;
 
-let _editorInstance: any = null;
+declare global {
+  interface Window { require: any; monaco: MonacoInstance; }
+}
+
+let _editorInstance: MonacoInstance = null;
 let _currentPath: string | null = null;
 let _onSave: ((path: string, content: string) => void) | null = null;
 
@@ -20,28 +25,27 @@ const GAIA_THEME = {
     { token: 'identifier', foreground: 'e0e0e0' },
   ],
   colors: {
-    'editor.background':           '#1e1e1e',
-    'editor.foreground':           '#e0e0e0',
+    'editor.background':              '#1e1e1e',
+    'editor.foreground':              '#e0e0e0',
     'editor.lineHighlightBackground': '#2a2a2a',
-    'editor.selectionBackground':  '#00b4a640',
-    'editorCursor.foreground':     '#00b4a6',
-    'editorLineNumber.foreground': '#4a4a4a',
-    'editor.findMatchBackground':  '#00b4a630',
+    'editor.selectionBackground':     '#00b4a640',
+    'editorCursor.foreground':        '#00b4a6',
+    'editorLineNumber.foreground':    '#4a4a4a',
+    'editor.findMatchBackground':     '#00b4a630',
   },
 };
 
 export async function loadMonaco(): Promise<void> {
-  if (typeof monaco !== 'undefined') return;
+  if (typeof window.monaco !== 'undefined') return;
   return new Promise((resolve, reject) => {
-    // Load Monaco via CDN
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs/loader.js';
     script.onload = () => {
-      (window as any).require.config({
+      window.require.config({
         paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs' }
       });
-      (window as any).require(['vs/editor/editor.main'], () => {
-        monaco.editor.defineTheme('gaia-dark', GAIA_THEME);
+      window.require(['vs/editor/editor.main'], () => {
+        window.monaco.editor.defineTheme('gaia-dark', GAIA_THEME);
         resolve();
       });
     };
@@ -57,7 +61,7 @@ export async function mountMonacoEditor(
   await loadMonaco();
   if (options?.onSave) _onSave = options.onSave;
 
-  _editorInstance = monaco.editor.create(container, {
+  _editorInstance = window.monaco.editor.create(container, {
     theme: 'gaia-dark',
     automaticLayout: true,
     fontSize: 13,
@@ -74,7 +78,7 @@ export async function mountMonacoEditor(
 
   // Ctrl+S save
   _editorInstance.addCommand(
-    monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+    window.monaco.KeyMod.CtrlCmd | window.monaco.KeyCode.KeyS,
     () => {
       if (_currentPath && _onSave) {
         _onSave(_currentPath, _editorInstance.getValue());
@@ -84,7 +88,7 @@ export async function mountMonacoEditor(
 
   // Ctrl+H find & replace
   _editorInstance.addCommand(
-    monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyH,
+    window.monaco.KeyMod.CtrlCmd | window.monaco.KeyCode.KeyH,
     () => _editorInstance.getAction('editor.action.startFindReplaceAction').run()
   );
 }
@@ -105,14 +109,10 @@ export function openInEditor(path: string, content: string): void {
     html: 'html',
   };
   const language = langMap[ext] ?? 'plaintext';
-  const model = monaco.editor.createModel(content, language);
+  const model = window.monaco.editor.createModel(content, language);
   _editorInstance.setModel(model);
 }
 
-export function getEditorContent(): string {
-  return _editorInstance?.getValue() ?? '';
-}
-
 export function markEditorClean(): void {
-  _editorInstance?.getModel()?.setEOL(0); // triggers change tracking reset
+  _editorInstance?.getModel()?.setEOL(0);
 }
