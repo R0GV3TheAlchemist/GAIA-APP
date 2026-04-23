@@ -25,25 +25,22 @@ jobs:
       - name: Build gaia-backend.exe
         run: pyinstaller gaia-backend.spec
 
-      - name: Rename & stage sidecar
+      - name: Stage sidecar with correct triple name
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path src-tauri\binaries
           Copy-Item dist\gaia-backend.exe `
             src-tauri\binaries\gaia-backend-x86_64-pc-windows-msvc.exe
-
-      - name: Verify sidecar exists
-        shell: pwsh
-        run: |
           $f = "src-tauri\binaries\gaia-backend-x86_64-pc-windows-msvc.exe"
-          if (-not (Test-Path $f)) { throw "Sidecar not found: $f" }
-          Write-Host "Sidecar OK: $((Get-Item $f).Length) bytes"
+          if (-not (Test-Path $f)) { throw "Sidecar not found after copy: $f" }
+          Write-Host "Sidecar staged: $((Get-Item $f).Length) bytes"
 
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
           name: gaia-backend-sidecar
-          path: src-tauri/binaries/gaia-backend-x86_64-pc-windows-msvc.exe
+          # Upload the whole binaries folder so the download restores it intact
+          path: src-tauri/binaries/
 
   # ── 2. Build the Tauri app ───────────────────────────────────────────────
   build-tauri:
@@ -70,25 +67,27 @@ jobs:
       - name: Build frontend (Vite)
         run: npm run build
 
-      - name: Download sidecar into binaries/
+      - name: Download sidecar artifact
         uses: actions/download-artifact@v4
         with:
           name: gaia-backend-sidecar
-          path: src-tauri/binaries
+          # Restore directly into src-tauri/binaries/
+          path: src-tauri/binaries/
 
-      - name: Verify sidecar present before Rust compile
+      - name: Verify sidecar at exact Rust build path
         shell: pwsh
         run: |
           $f = "src-tauri\binaries\gaia-backend-x86_64-pc-windows-msvc.exe"
-          if (-not (Test-Path $f)) { throw "Sidecar missing: $f" }
+          if (-not (Test-Path $f)) {
+            Write-Host "Contents of src-tauri/binaries/:"
+            Get-ChildItem src-tauri\binaries\ | ForEach-Object { Write-Host $_.Name }
+            throw "Sidecar missing at expected path: $f"
+          }
           Write-Host "Sidecar confirmed: $((Get-Item $f).Length) bytes"
 
       - name: Install Pillow
         run: pip install Pillow
 
-      # Regenerate ALL stub PNGs and icon.ico from Square150x150Logo.png
-      # (the only confirmed valid source image at 17 KB).
-      # Tauri codegen reads 32x32.png and 128x128.png at compile time.
       - name: Regenerate icons
         shell: python
         run: |
@@ -105,7 +104,6 @@ jobs:
               src.resize((size, size), Image.LANCZOS).save(buf, format="PNG")
               return buf.getvalue()
 
-          # Overwrite every stub PNG that Tauri codegen or winres references
           replacements = {
               "32x32.png":      32,
               "128x128.png":    128,
@@ -118,7 +116,6 @@ jobs:
                   f.write(data)
               print(f"  {filename}: {len(data)} bytes")
 
-          # Build ICO manually (Pillow append_images is broken on Windows)
           ico_sizes = [16, 24, 32, 48, 64, 128, 256]
           png_frames = [make_png(s) for s in ico_sizes]
 
