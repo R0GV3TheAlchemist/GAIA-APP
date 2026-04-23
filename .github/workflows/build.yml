@@ -43,6 +43,8 @@ jobs:
     name: Build Tauri App (Windows)
     runs-on: windows-latest
     needs: build-sidecar
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
