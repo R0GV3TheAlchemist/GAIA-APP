@@ -1,0 +1,25 @@
+/* GAIA Dev Suite — Layout */
+
+.dev-suite {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  grid-template-columns: 48px 240px 1fr 280px;
+  grid-template-rows: 1fr 200px 24px;
+  grid-template-areas:
+    "activity sidebar editor right"
+    "activity sidebar bottom right"
+    "activity status  status status";
+  background: #0d0d0d;
+  color: #e0e0e0;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 13px;
+}
+
+.ds-activity-bar  { grid-area: activity; background: #111; border-right: 1px solid #222; }
+.ds-sidebar       { grid-area: sidebar;  background: #161616; border-right: 1px solid #222; overflow-y: auto; }
+.ds-editor-area   { grid-area: editor;   background: #1e1e1e; overflow: hidden; }
+.ds-right-sidebar { grid-area: right;    background: #161616; border-left: 1px solid #222; overflow-y: auto; }
+.ds-bottom-panel  { grid-area: bottom;   background: #111; border-top: 1px solid #222; overflow: hidden; }
+.ds-status-bar    { grid-area: status;   background: #00b4a6; color: #000; display: flex; align-items: center; padding: 0 12px; gap: 16px; font-size: 11px; }
