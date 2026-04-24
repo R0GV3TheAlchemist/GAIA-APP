@@ -1,7 +1,7 @@
 {
   "productName": "GAIA",
   "version": "0.1.0",
-  "identifier": "com.rogve.gaia",
+  "identifier": "earth.gaia.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420"
@@ -13,8 +13,8 @@
         "title": "GAIA",
         "width": 1200,
         "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
+        "minWidth": 1000,
+        "minHeight": 700,
         "resizable": true,
         "fullscreen": false,
         "theme": "Dark",
@@ -40,6 +40,7 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/256x256.png",
       "icons/icon.ico"
     ],
     "externalBin": [
@@ -50,19 +51,26 @@
         "type": "embedBootstrapper"
       },
       "wix": {
-        "language": "en-US"
+        "language": "en-US",
+        "upgradeCode": "4A7F1B2C-8E3D-4F56-A9B0-C1D2E3F40506",
+        "appicon": "icons/icon.ico",
+        "dialogImagePath": "icons/installer/wix-dialog.bmp",
+        "bannerBmpPath": "icons/installer/wix-banner.bmp"
       },
       "nsis": {
         "languages": ["English"],
         "installMode": "perMachine",
-        "compression": "lzma"
+        "compression": "lzma",
+        "headerImage": "icons/installer/nsis-header.bmp",
+        "sidebarImage": "icons/installer/nsis-sidebar.bmp"
       }
     },
     "publisher": "R0GV3 the Alchemist",
     "copyright": "Copyright © 2026 R0GV3 the Alchemist",
     "category": "Productivity",
     "shortDescription": "GAIA — Sovereign AI Companion",
-    "longDescription": "GAIA is a sovereign cross-platform AI companion built on alchemical principles, quantum cognition, and deep human-AI partnership."
+    "longDescription": "GAIA is a sovereign cross-platform AI companion built on alchemical principles, quantum cognition, and deep human-AI partnership.",
+    "supportUrl": "https://github.com/R0GV3TheAlchemist/GAIA-OS/issues"
   },
   "plugins": {
     "updater": {
