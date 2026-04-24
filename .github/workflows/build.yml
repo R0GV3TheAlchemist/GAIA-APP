@@ -28,8 +28,8 @@ jobs:
       - name: Stage sidecar with correct triple name
         shell: pwsh
         run: |
-          $dest = "src-tauri\binaries\gaia-backend-x86_64-pc-windows-msvc.exe"
-          Copy-Item dist\gaia-backend.exe $dest -Force
+          $dest = "src-tauri\\binaries\\gaia-backend-x86_64-pc-windows-msvc.exe"
+          Copy-Item dist\\gaia-backend.exe $dest -Force
           Write-Host "Sidecar staged: $((Get-Item $dest).Length) bytes"
 
       - name: Upload sidecar artifact
@@ -60,7 +60,7 @@ jobs:
           cache: npm
 
       - name: Install Node deps
-        run: npm ci
+        run: npm install
 
       - name: Build frontend (Vite)
         run: npm run build
@@ -75,9 +75,9 @@ jobs:
       - name: Verify sidecar
         shell: pwsh
         run: |
-          $f = "src-tauri\binaries\gaia-backend-x86_64-pc-windows-msvc.exe"
+          $f = "src-tauri\\binaries\\gaia-backend-x86_64-pc-windows-msvc.exe"
           if (-not (Test-Path $f)) {
-            Get-ChildItem src-tauri\binaries\
+            Get-ChildItem src-tauri\\binaries\\
             throw "Sidecar missing: $f"
           }
           $size = (Get-Item $f).Length
