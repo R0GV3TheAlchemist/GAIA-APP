@@ -9,61 +9,146 @@ permissions:
   contents: write
 
 jobs:
-  release-windows:
-    name: Release GAIA (Windows)
-    runs-on: windows-latest
+
+  # ── 1. Build Python sidecar for each platform ─────────────────────────────
+  build-sidecar:
+    name: Sidecar (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            ext: .exe
+          - name: macOS
+            os: macos-latest
+            triple: aarch64-apple-darwin
+            ext: ""
+          - name: Linux
+            os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
 
     steps:
-      # 1. Full history so tauri-action can read the tag message
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Node.js
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      # 3. Rust stable
-      - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      # 4. Python 3.11 + sidecar
-      - name: Setup Python 3.11
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
 
       - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller Pillow
+        run: pip install -r requirements.txt pyinstaller
 
-      - name: Build gaia-backend sidecar (PyInstaller)
+      - name: Build gaia-backend sidecar
         run: pyinstaller gaia-backend.spec --clean
-        shell: bash
 
-      - name: Stage sidecar binary for Tauri
+      - name: Stage sidecar (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
-          mkdir -p src-tauri/binaries
-          cp dist/gaia-backend.exe \
-             src-tauri/binaries/gaia-backend-x86_64-pc-windows-msvc.exe
-        shell: bash
+          $dest = "src-tauri\binaries\gaia-backend-${{ matrix.triple }}.exe"
+          Copy-Item dist\gaia-backend.exe $dest -Force
+          Write-Host "Staged: $((Get-Item $dest).Length) bytes"
 
-      # 5. Regenerate Windows icon assets (same fix as build workflows)
-      - name: Regenerate icon assets
+      - name: Stage sidecar (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          dest="src-tauri/binaries/gaia-backend-${{ matrix.triple }}"
+          cp dist/gaia-backend "$dest"
+          chmod +x "$dest"
+          echo "Staged: $(wc -c < $dest) bytes"
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-${{ matrix.triple }}
+          path: src-tauri/binaries/gaia-backend-${{ matrix.triple }}${{ matrix.ext }}
+
+
+  # ── 2. Build + publish Tauri release for each platform ────────────────────
+  release:
+    name: Release (${{ matrix.name }})
+    needs: build-sidecar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            ext: .exe
+            rust_target: x86_64-pc-windows-msvc
+          - name: macOS
+            os: macos-latest
+            triple: aarch64-apple-darwin
+            ext: ""
+            rust_target: aarch64-apple-darwin
+          - name: Linux
+            os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            ext: ""
+            rust_target: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pyinstaller Pillow
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Build frontend (Vite)
+        run: npm run build
+
+      - name: Download sidecar
+        uses: actions/download-artifact@v4
+        with:
+          name: sidecar-${{ matrix.triple }}
+          path: src-tauri/binaries/
+
+      - name: Mark sidecar executable (Unix)
+        if: matrix.os != 'windows-latest'
+        run: chmod +x src-tauri/binaries/gaia-backend-${{ matrix.triple }}
+
+      - name: Regenerate icons
         shell: python
         run: |
           import os, struct
@@ -72,7 +157,6 @@ jobs:
 
           icons = "src-tauri/icons"
           src = Image.open(f"{icons}/Square150x150Logo.png").convert("RGBA")
-          print(f"Source: {src.size} {src.mode}")
 
           def make_png(size):
               buf = BytesIO()
@@ -85,9 +169,7 @@ jobs:
               "128x128@2x.png": 256,
               "icon.png": 512,
           }.items():
-              data = make_png(size)
-              open(f"{icons}/{filename}", "wb").write(data)
-              print(f"  {filename}: {len(data)} bytes")
+              open(f"{icons}/{filename}", "wb").write(make_png(size))
 
           ico_sizes = [16, 24, 32, 48, 64, 128, 256]
           frames = [make_png(s) for s in ico_sizes]
@@ -99,24 +181,20 @@ jobs:
               w = s if s < 256 else 0
               entries += struct.pack("<BBBBHHII", w, w, 0, 0, 1, 32, len(f), offset)
               offset += len(f)
-          ico_path = f"{icons}/icon.ico"
-          with open(ico_path, "wb") as out:
+          with open(f"{icons}/icon.ico", "wb") as out:
               out.write(header + entries)
-              for f in frames:
-                  out.write(f)
-          sz = os.path.getsize(ico_path)
-          print(f"icon.ico: {sz} bytes")
-          assert sz > 10000, f"ICO too small: {sz}"
+              for f in frames: out.write(f)
 
-      # 6. Node deps
-      - name: Install Node dependencies
-        run: npm install
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
-      # 7. Build + publish via tauri-action
-      #    - Compiles the Tauri app (signed)
-      #    - Creates a GitHub Release with installers attached
-      #    - Auto-generates latest.json for the updater endpoint
-      #    - Marks as pre-release if the tag contains a hyphen (e.g. v1.0.0-beta)
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       - name: Build & publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -127,8 +205,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "GAIA ${{ github.ref_name }}"
           releaseBody: |
-            See [CHANGELOG.md](https://github.com/R0GV3TheAlchemist/GAIA-APP/blob/main/CHANGELOG.md)
+            See [CHANGELOG.md](https://github.com/R0GV3TheAlchemist/GAIA-OS/blob/main/CHANGELOG.md)
             for full release notes.
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           includeUpdaterJson: true
+          args: --target ${{ matrix.rust_target }}
