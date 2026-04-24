@@ -3,14 +3,14 @@
 // banner, and handles download + install with progress feedback.
 // Canon Ref: C43 — Sovereign Distribution
 
-import { check, Update } from '@tauri-apps/plugin-updater';
-import { relaunch }      from '@tauri-apps/plugin-process';
-import { logInfo, logWarn, logError } from './diagnostics';
+import { check, Update, DownloadEvent } from '@tauri-apps/plugin-updater';
+import { relaunch }                      from '@tauri-apps/plugin-process';
+import { logInfo, logWarn, logError }    from './diagnostics';
 import './updater.css';
 
 let _banner: HTMLElement | null = null;
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Public API ──────────────────────────────────────────────────────
 
 /**
  * Call once after sidecar:ready.
@@ -22,7 +22,7 @@ export async function checkForUpdates(): Promise<void> {
   try {
     const update = await check();
     if (update?.available) {
-      logInfo('updater', `Update available`, { version: update.version });
+      logInfo('updater', 'Update available', { version: update.version });
       showUpdateBanner(update);
     } else {
       logInfo('updater', 'No update available — app is current');
@@ -32,7 +32,7 @@ export async function checkForUpdates(): Promise<void> {
   }
 }
 
-// ── Banner UI ─────────────────────────────────────────────────────────────────
+// ── Banner UI ───────────────────────────────────────────────────────────
 
 function showUpdateBanner(update: Update): void {
   if (_banner) return;
@@ -82,7 +82,7 @@ function dismissBanner(): void {
   }
 }
 
-// ── Install flow ──────────────────────────────────────────────────────────────
+// ── Install flow ───────────────────────────────────────────────────────────
 
 async function installUpdate(update: Update): Promise<void> {
   const actionsEl  = _banner?.querySelector<HTMLElement>('.update-actions');
@@ -90,14 +90,14 @@ async function installUpdate(update: Update): Promise<void> {
   if (actionsEl)  actionsEl.hidden  = true;
   if (progressEl) progressEl.hidden = false;
 
-  const fillEl  = document.getElementById('gaia-update-progress-fill') as HTMLElement;
+  const fillEl  = document.getElementById('gaia-update-progress-fill')  as HTMLElement;
   const labelEl = document.getElementById('gaia-update-progress-label') as HTMLElement;
 
   let downloaded = 0;
   let total      = 0;
 
   try {
-    await update.downloadAndInstall(event => {
+    await update.downloadAndInstall((event: DownloadEvent) => {
       switch (event.event) {
         case 'Started':
           total = event.data.contentLength ?? 0;
@@ -134,12 +134,12 @@ async function installUpdate(update: Update): Promise<void> {
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
     .replace(/"/g, '&quot;');
 }
