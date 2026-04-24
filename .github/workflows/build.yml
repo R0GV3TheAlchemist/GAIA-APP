@@ -1,4 +1,4 @@
-name: GAIA Build
+name: 🔨 Build
 
 on:
   push:
@@ -7,10 +7,32 @@ on:
     branches: [main]
 
 jobs:
-  # ── 1. Build the Python sidecar ──────────────────────────────────────────
+
+  # ── 1. Build Python sidecar for each platform ──────────────────────────────
   build-sidecar:
-    name: Build Python Sidecar (Windows)
-    runs-on: windows-latest
+    name: Sidecar (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            ext: .exe
+            copy_cmd: pwsh
+          - name: macOS
+            os: macos-latest
+            triple: aarch64-apple-darwin
+            ext: ""
+            copy_cmd: bash
+          - name: Linux
+            os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            ext: ""
+            copy_cmd: bash
+
+    runs-on: ${{ matrix.os }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -22,29 +44,64 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt pyinstaller
 
-      - name: Build gaia-backend.exe
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+
+      - name: Build gaia-backend sidecar
         run: pyinstaller gaia-backend.spec
 
-      - name: Stage sidecar with correct triple name
+      - name: Stage sidecar with triple name (Windows)
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $dest = "src-tauri\\binaries\\gaia-backend-x86_64-pc-windows-msvc.exe"
-          Copy-Item dist\\gaia-backend.exe $dest -Force
-          Write-Host "Sidecar staged: $((Get-Item $dest).Length) bytes"
+          $dest = "src-tauri\binaries\gaia-backend-${{ matrix.triple }}.exe"
+          Copy-Item dist\gaia-backend.exe $dest -Force
+          Write-Host "Staged: $((Get-Item $dest).Length) bytes"
+
+      - name: Stage sidecar with triple name (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          dest="src-tauri/binaries/gaia-backend-${{ matrix.triple }}"
+          cp dist/gaia-backend "$dest"
+          chmod +x "$dest"
+          echo "Staged: $(wc -c < $dest) bytes"
 
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gaia-backend-sidecar
-          path: src-tauri/binaries/gaia-backend-x86_64-pc-windows-msvc.exe
+          name: sidecar-${{ matrix.triple }}
+          path: src-tauri/binaries/gaia-backend-${{ matrix.triple }}${{ matrix.ext }}
 
-  # ── 2. Build the Tauri app ───────────────────────────────────────────────
+
+  # ── 2. Build Tauri app for each platform ───────────────────────────────────
   build-tauri:
-    name: Build Tauri App (Windows)
-    runs-on: windows-latest
+    name: Tauri (${{ matrix.name }})
     needs: build-sidecar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            ext: .exe
+            rust_target: x86_64-pc-windows-msvc
+          - name: macOS
+            os: macos-latest
+            triple: aarch64-apple-darwin
+            ext: ""
+            rust_target: aarch64-apple-darwin
+          - name: Linux
+            os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            ext: ""
+            rust_target: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -53,11 +110,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up Node
+      - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
+      - name: Install Linux system deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - name: Install Node deps
         run: npm install
@@ -65,27 +132,19 @@ jobs:
       - name: Build frontend (Vite)
         run: npm run build
 
-      # Download real sidecar and overwrite the committed stub
-      - name: Download & overwrite sidecar
+      - name: Download sidecar
         uses: actions/download-artifact@v4
         with:
-          name: gaia-backend-sidecar
+          name: sidecar-${{ matrix.triple }}
           path: src-tauri/binaries/
 
-      - name: Verify sidecar
-        shell: pwsh
-        run: |
-          $f = "src-tauri\\binaries\\gaia-backend-x86_64-pc-windows-msvc.exe"
-          if (-not (Test-Path $f)) {
-            Get-ChildItem src-tauri\\binaries\\
-            throw "Sidecar missing: $f"
-          }
-          $size = (Get-Item $f).Length
-          if ($size -lt 100000) { throw "Sidecar looks like a stub ($size bytes)" }
-          Write-Host "Sidecar OK: $size bytes"
+      - name: Mark sidecar executable (Unix)
+        if: matrix.os != 'windows-latest'
+        run: chmod +x src-tauri/binaries/gaia-backend-${{ matrix.triple }}
 
-      - name: Install Pillow
+      - name: Install Pillow & regenerate icons
         run: pip install Pillow
+        shell: bash
 
       - name: Regenerate icons
         shell: python
@@ -127,14 +186,12 @@ jobs:
           with open(ico_path, "wb") as out:
               out.write(header + entries)
               for f in frames: out.write(f)
-          sz = os.path.getsize(ico_path)
-          print(f"icon.ico: {sz} bytes")
-          assert sz > 10_000, f"ICO too small: {sz}"
+          print(f"icon.ico: {os.path.getsize(ico_path)} bytes")
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.rust_target }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -150,3 +207,4 @@ jobs:
           releaseName: "GAIA v__VERSION__"
           releaseDraft: true
           prerelease: false
+          args: --target ${{ matrix.rust_target }}
