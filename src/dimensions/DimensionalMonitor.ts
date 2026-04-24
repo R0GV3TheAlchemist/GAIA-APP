@@ -28,8 +28,6 @@ const DIMS = [
   { key: 'D5_archetypal',  label: 'D5 — Archetypal',      sigil: '◇', colour: '#e07040' },
 ] as const;
 
-type DimKey = typeof DIMS[number]['key'];
-
 // ── Mount ─────────────────────────────────────────────────────────────────
 
 export function mountDimensionalMonitor(container: HTMLElement): () => void {

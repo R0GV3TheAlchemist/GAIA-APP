@@ -88,7 +88,6 @@ export async function mountCanonTab(container: HTMLElement): Promise<void> {
     const btn = document.createElement('button');
     btn.className = 'canon-nav-btn' + (i === 0 ? ' active' : '');
     btn.dataset.index = String(i);
-    const label = doc.filename.replace('.md', '').replace('-', ' — ').split('-').join(' ');
     btn.innerHTML = `<span class="canon-doc-id">${doc.filename.match(/^(C\d+)/)?.[1] ?? '📄'}</span><span class="canon-doc-title">${doc.title}</span>`;
     nav.appendChild(btn);
   });

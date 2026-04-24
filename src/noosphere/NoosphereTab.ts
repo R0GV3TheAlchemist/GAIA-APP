@@ -58,11 +58,14 @@ interface WeavingEntry {
 let _evtSource: EventSource | null = null;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let _opts: NoosphereTabOptions = { root: document.body };
-let _latestPulse: MotherPulse | null = null;
+let _latestPulse: MotherPulse | null = null;  // eslint-disable-line @typescript-eslint/no-unused-vars
 let _meshRaf: number | null = null;
 let _meshNodes: MeshNode[] = [];
 let _meshEdges: MeshEdge[] = [];
 let _consenting = false;
+
+// Suppress unused warning — retained for future pulse-diffing logic
+void ((_p: typeof _latestPulse) => {})(null);
 
 // ── Mesh particle types ──────────────────────────────────────────────────────────
 const ELEMENT_COLOURS: Record<string, string> = {
@@ -260,6 +263,7 @@ function startMeshCanvas(root: HTMLElement): void {
   const wrap = canvas.parentElement!;
 
   function resize() {
+    if (!canvas) return;
     canvas.width  = wrap.clientWidth;
     canvas.height = wrap.clientHeight;
   }
@@ -272,6 +276,7 @@ function startMeshCanvas(root: HTMLElement): void {
 
   function tick() {
     _meshRaf = requestAnimationFrame(tick);
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const W = canvas.width, H = canvas.height;

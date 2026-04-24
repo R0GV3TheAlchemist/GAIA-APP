@@ -126,8 +126,8 @@ export class App {
     let quantumMounted    = false;
     let dimensionsMounted = false;
     let archetypesMounted = false;
-    let dimensionsTeardown:  (() => void) | null = null;
-    let archetypesTeardown:  (() => void) | null = null;
+    let _dimensionsTeardown:  (() => void) | null = null;
+    let _archetypesTeardown:  (() => void) | null = null;
     logInfo('app', 'All views mounted');
 
     let _activeView = 'search';
@@ -155,11 +155,11 @@ export class App {
           quantumMounted = true;
         }
         if (view === 'dimensions' && !dimensionsMounted) {
-          dimensionsTeardown = mountDimensionalMonitor(document.getElementById('view-dimensions')!);
+          _dimensionsTeardown = mountDimensionalMonitor(document.getElementById('view-dimensions')!);
           dimensionsMounted  = true;
         }
         if (view === 'archetypes' && !archetypesMounted) {
-          archetypesTeardown = mountArchetypalTab(document.getElementById('view-archetypes')!);
+          _archetypesTeardown = mountArchetypalTab(document.getElementById('view-archetypes')!);
           archetypesMounted  = true;
         }
       });
