@@ -22,10 +22,10 @@ import { exists, mkdir, copyFile, readDir } from '@tauri-apps/plugin-fs';
 import { listen }          from '@tauri-apps/api/event';
 import { checkForUpdates } from './updater';
 import { logInfo, logWarn, logError } from './diagnostics';
+import { API_BASE } from './config';
 
-const metaEnv = ((import.meta as unknown as { env?: Record<string, string> }).env) ?? {};
-const BASE_URL = metaEnv.VITE_API_BASE ?? 'http://localhost:8008';
-export const API_BASE = BASE_URL;
+// Re-export so existing consumers keep working without change
+export { API_BASE };
 
 // ── First-launch: seed %APPDATA%\GAIA\canon\ from bundled resources ────
 async function ensureAppDataDirs(): Promise<void> {

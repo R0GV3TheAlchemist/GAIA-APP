@@ -1,6 +1,6 @@
 // GAIA Dev Suite — Status Bar
 
-import { API_BASE } from '../app';
+import { API_BASE } from '../config';   // ← was '../app' (circular dep fix)
 import { checkForUpdates } from '../updater';
 
 export function mountStatusBar(root: HTMLElement): void {
@@ -20,7 +20,7 @@ export function mountStatusBar(root: HTMLElement): void {
 
   document.getElementById('sb-check-updates')?.addEventListener('click', async () => {
     const btn = document.getElementById('sb-check-updates') as HTMLButtonElement;
-    if (btn) { btn.textContent = '&#9650; Checking…'; btn.disabled = true; }
+    if (btn) { btn.innerHTML = '&#9650; Checking\u2026'; btn.disabled = true; }
     await checkForUpdates();
     if (btn) { btn.innerHTML = '&#9650; Check for Updates'; btn.disabled = false; }
   });

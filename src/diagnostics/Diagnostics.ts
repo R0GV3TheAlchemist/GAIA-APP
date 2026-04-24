@@ -6,7 +6,7 @@ import './Diagnostics.css';
 import { invoke }        from '@tauri-apps/api/core';
 import { getVersion }    from '@tauri-apps/api/app';
 import { listen }        from '@tauri-apps/api/event';
-import { API_BASE }      from '../app';
+import { API_BASE }      from '../config';   // ← was '../app' (circular dep fix)
 import { getLogBuffer, LogEntry } from './logger';
 
 export function mountDiagnostics(root: HTMLElement): void {
@@ -56,7 +56,6 @@ export function mountDiagnostics(root: HTMLElement): void {
     </div>
   `;
 
-  // Track cold-start time from page load → sidecar:ready
   const t0 = performance.now();
   let coldStartMs: number | null = null;
 
@@ -66,35 +65,31 @@ export function mountDiagnostics(root: HTMLElement): void {
   });
 
   async function refreshStats(csMs?: number): Promise<void> {
-    // Version
     try {
       const v = await getVersion();
       const el = document.getElementById('diag-version');
       if (el) el.textContent = `v${v}`;
     } catch { /* ignore */ }
 
-    // Sidecar health
     try {
       const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(2000) });
       const el = document.getElementById('diag-sidecar');
       if (el) {
-        el.textContent  = res.ok ? '● online' : '● degraded';
-        el.style.color  = res.ok ? '#4f98a3' : '#fdab43';
+        el.textContent = res.ok ? '\u25cf online' : '\u25cf degraded';
+        el.style.color = res.ok ? '#4f98a3' : '#fdab43';
       }
     } catch {
       const el = document.getElementById('diag-sidecar');
-      if (el) { el.textContent = '● offline'; el.style.color = '#dd6974'; }
+      if (el) { el.textContent = '\u25cf offline'; el.style.color = '#dd6974'; }
     }
 
-    // Cold start
     const csEl = document.getElementById('diag-coldstart');
     if (csEl) {
       const ms = csMs ?? coldStartMs;
-      csEl.textContent = ms !== null ? `${(ms / 1000).toFixed(2)} s` : 'measuring…';
+      csEl.textContent = ms !== null ? `${(ms / 1000).toFixed(2)} s` : 'measuring\u2026';
     }
 
-    // Buffer size
-    const buf = getLogBuffer();
+    const buf   = getLogBuffer();
     const bufEl = document.getElementById('diag-bufsize');
     if (bufEl) bufEl.textContent = `${buf.length} entries`;
 
@@ -111,7 +106,7 @@ export function mountDiagnostics(root: HTMLElement): void {
 
     const entries = getLogBuffer()
       .filter(e => (levels[e.level] ?? 0) >= minLevel)
-      .slice(-100); // show last 100 matching entries
+      .slice(-100);
 
     listEl.innerHTML = entries.length === 0
       ? '<div class="diag-log-empty">No log entries.</div>'
@@ -122,7 +117,7 @@ export function mountDiagnostics(root: HTMLElement): void {
 
   function renderEntry(e: LogEntry): string {
     const levelClass = `diag-log-level-${e.level.toLowerCase()}`;
-    const time = e.ts.slice(11, 23); // HH:MM:SS.mmm
+    const time = e.ts.slice(11, 23);
     const data = e.data !== undefined ? ` ${JSON.stringify(e.data)}` : '';
     return `
       <div class="diag-log-row">
@@ -133,7 +128,6 @@ export function mountDiagnostics(root: HTMLElement): void {
       </div>`;
   }
 
-  // Buttons
   document.getElementById('diag-refresh')?.addEventListener('click', () => refreshStats());
 
   document.getElementById('diag-open-logs')?.addEventListener('click', async () => {
@@ -145,7 +139,10 @@ export function mountDiagnostics(root: HTMLElement): void {
     const report = buildReport();
     navigator.clipboard.writeText(report).then(() => {
       const btn = document.getElementById('diag-copy');
-      if (btn) { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = '\u{1F4CB} Copy Report'; }, 2000); }
+      if (btn) {
+        btn.textContent = '\u2713 Copied';
+        setTimeout(() => { btn.textContent = '\u{1F4CB} Copy Report'; }, 2000);
+      }
     });
   });
 
@@ -155,15 +152,13 @@ export function mountDiagnostics(root: HTMLElement): void {
     if (listEl) listEl.innerHTML = '<div class="diag-log-empty">Log cleared (in-view only).</div>';
   });
 
-  // Initial render
   refreshStats();
-  // Auto-refresh every 10 s
   setInterval(() => refreshStats(), 10_000);
 }
 
 function buildReport(): string {
   const lines: string[] = [
-    `GAIA Diagnostics Report — ${new Date().toISOString()}`,
+    `GAIA Diagnostics Report \u2014 ${new Date().toISOString()}`,
     '='.repeat(60),
     ...getLogBuffer().slice(-50).map(e =>
       `${e.ts} [${e.level}] ${e.module}: ${e.msg}${
@@ -174,5 +169,5 @@ function buildReport(): string {
 }
 
 function escHtml(s: string): string {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
