@@ -1,5 +1,5 @@
 // GAIA App — Top-level layout with tab navigation
-// Views: SEARCH | CHAT | GAIAN | SHELL | MEMORY | NOOSPHERE | CANON | QUANTUM
+// Views: SEARCH | GAIAN | CHAT | SHELL | MEMORY | NOOSPHERE | CANON | QUANTUM | DIMENSIONS
 // Canon Ref: C42, C43, C44
 
 import './app.css';
@@ -9,21 +9,23 @@ import './chat/Chat.css';
 import './memory/Memory.css';
 import './noosphere/NoosphereTab.css';
 import './canon/CanonTab.css';
-import { mountSearch }       from './search/Search';
-import { mountShell }        from './shell/Shell';
-import { mountChat }         from './chat/Chat';
-import { mountMemory }       from './memory/Memory';
-import { mountGaianChat }    from './gaian/GaianChatView';
+import './dimensions/DimensionalMonitor.css';
+import { mountSearch }            from './search/Search';
+import { mountShell }             from './shell/Shell';
+import { mountChat }              from './chat/Chat';
+import { mountMemory }            from './memory/Memory';
+import { mountGaianChat }         from './gaian/GaianChatView';
 import {
   mountNoosphereTab,
   unmountNoosphereTab,
 } from './noosphere';
-import { mountCanonTab }     from './canon/CanonTab';
-import { mountQuantumTab }   from './quantum/QuantumTab';
+import { mountCanonTab }          from './canon/CanonTab';
+import { mountQuantumTab }        from './quantum/QuantumTab';
+import { mountDimensionalMonitor } from './dimensions/DimensionalMonitor';
 import { appDataDir, join, resolveResource } from '@tauri-apps/api/path';
-import { exists, mkdir, copyFile, readDir } from '@tauri-apps/plugin-fs';
-import { listen }            from '@tauri-apps/api/event';
-import { checkForUpdates }   from './updater';
+import { exists, mkdir, copyFile, readDir }  from '@tauri-apps/plugin-fs';
+import { listen }                 from '@tauri-apps/api/event';
+import { checkForUpdates }        from './updater';
 import { logInfo, logWarn, logError } from './diagnostics';
 import { API_BASE } from './config';
 
@@ -93,16 +95,18 @@ export class App {
     <button class="tab-btn"        data-view="noosphere">&#127760; Noosphere</button>
     <button class="tab-btn"        data-view="canon">&#128220; Canon</button>
     <button class="tab-btn"        data-view="quantum">&#10731; Quantum</button>
+    <button class="tab-btn"        data-view="dimensions">&#11042; Dimensions</button>
   </nav>
   <div class="view-container">
-    <div id="view-search"     class="view active"></div>
-    <div id="view-gaian"      class="view"></div>
-    <div id="view-chat"       class="view"></div>
-    <div id="view-shell"      class="view"></div>
-    <div id="view-memory"     class="view"></div>
-    <div id="view-noosphere"  class="view"></div>
-    <div id="view-canon"      class="view"></div>
-    <div id="view-quantum"    class="view"></div>
+    <div id="view-search"      class="view active"></div>
+    <div id="view-gaian"       class="view"></div>
+    <div id="view-chat"        class="view"></div>
+    <div id="view-shell"       class="view"></div>
+    <div id="view-memory"      class="view"></div>
+    <div id="view-noosphere"   class="view"></div>
+    <div id="view-canon"       class="view"></div>
+    <div id="view-quantum"     class="view"></div>
+    <div id="view-dimensions"  class="view"></div>
   </div>
 </div>
 `;
@@ -115,8 +119,10 @@ export class App {
     mountNoosphereTab({ root: document.getElementById('view-noosphere')!, apiBase: API_BASE });
 
     // Lazy-mount tabs that do async I/O or heavy work on first visit
-    let canonMounted   = false;
-    let quantumMounted = false;
+    let canonMounted      = false;
+    let quantumMounted    = false;
+    let dimensionsMounted = false;
+    let dimensionsTeardown: (() => void) | null = null;
     logInfo('app', 'All views mounted');
 
     let _activeView = 'search';
@@ -142,6 +148,10 @@ export class App {
         if (view === 'quantum' && !quantumMounted) {
           mountQuantumTab(document.getElementById('view-quantum')!);
           quantumMounted = true;
+        }
+        if (view === 'dimensions' && !dimensionsMounted) {
+          dimensionsTeardown = mountDimensionalMonitor(document.getElementById('view-dimensions')!);
+          dimensionsMounted = true;
         }
       });
     });
