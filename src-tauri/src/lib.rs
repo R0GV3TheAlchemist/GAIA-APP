@@ -96,21 +96,20 @@ async fn restart_backend(app: tauri::AppHandle) -> Result<String, String> {
 /// Path: %APPDATA%\GAIA\logs  (Windows) or ~/.local/share/GAIA/logs (Linux/macOS)
 #[tauri::command]
 async fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
     let app_data = app
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?;
     let logs_dir = app_data.join("logs");
 
-    // Create the dir if it doesn't exist yet (no logs written before first open)
     if !logs_dir.exists() {
         std::fs::create_dir_all(&logs_dir).map_err(|e| e.to_string())?;
     }
 
-    // Use the shell plugin to open the folder in Explorer / Finder / Nautilus
-    let opener = app.shell();
-    opener
-        .open(logs_dir.to_string_lossy().to_string(), None)
+    app.opener()
+        .open_path(logs_dir.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| e.to_string())?;
 
     Ok(())
@@ -119,7 +118,6 @@ async fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
 // ── Sidecar startup ───────────────────────────────────────────────────────────
 
 /// Emit a sidecar:error event and show a native dialog.
-/// Also reveals the window so the user sees the error state rather than nothing.
 fn emit_backend_error(app: &tauri::AppHandle, reason: &str) {
     eprintln!("[GAIA] Backend error: {reason}");
 
@@ -181,7 +179,7 @@ fn start_python_sidecar(app: &tauri::App, handle: SidecarHandle) {
             Err(e) => {
                 emit_backend_error(
                     &app_handle,
-                    &format!("failed to launch gaia-backend.exe: {e}"),
+                    &format!("failed to launch gaia-backend: {e}"),
                 );
             }
             Ok((_rx, child)) => {
@@ -250,8 +248,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            // Window is hidden (visible: false in tauri.conf.json).
-            // start_python_sidecar will show it once /health responds 200.
             let handle = app.state::<SidecarHandle>().inner().clone();
             start_python_sidecar(app, handle);
 
