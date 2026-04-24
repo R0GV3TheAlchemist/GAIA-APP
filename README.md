@@ -6,6 +6,10 @@
 > Desktop Release: `v0.1.0` (Windows)
 
 [![Build](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/build.yml/badge.svg)](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/build.yml)
+[![Windows Build](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/build-windows.yml/badge.svg)](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/build-windows.yml)
+[![Tests](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/test.yml/badge.svg)](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/test.yml)
+[![Release](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/release.yml/badge.svg)](https://github.com/R0GV3TheAlchemist/GAIA-APP/actions/workflows/release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/R0GV3TheAlchemist/GAIA-APP?include_prereleases&label=release&color=teal)](https://github.com/R0GV3TheAlchemist/GAIA-APP/releases)
 
 ---
 
@@ -71,9 +75,10 @@ GAIA-APP/
 ├── simulation/                  # Simulation + scenario tooling
 ├── scripts/                     # Build + utility scripts
 ├── .github/workflows/           # CI/CD — GitHub Actions
-│   ├── build.yml                # Main build: Python sidecar + Tauri Windows release
+│   ├── build.yml                # Main build: Python sidecar + Tauri (all platforms)
 │   ├── build-windows.yml        # Windows-specific build
-│   └── test.yml                 # Automated test runner
+│   ├── test.yml                 # Automated test runner
+│   └── release.yml              # Release pipeline — fires on v* tags
 ├── Dockerfile
 ├── start.sh
 └── CHANGELOG.md
@@ -96,10 +101,13 @@ Download the latest release from the [Releases page](https://github.com/R0GV3The
 
 ### CI/CD Pipeline
 
-Every push to `main` triggers a full automated build:
+Every push to `main` triggers a full automated build. Pushing a `v*` tag triggers a full release:
+
 1. **Python sidecar** — PyInstaller bundles `gaia-backend.exe`
 2. **Tauri app** — Rust + Vite frontend compiled and bundled
-3. **Release artifacts** — `.msi` and `.exe` installers published as a draft GitHub Release
+3. **Signing** — Installers signed with `TAURI_SIGNING_PRIVATE_KEY`
+4. **Release** — `.msi` and `.exe` installers published to GitHub Releases automatically
+5. **Auto-updater** — GAIA checks for new releases on launch via the updater plugin
 
 ---
 

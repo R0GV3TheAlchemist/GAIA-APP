@@ -63,5 +63,15 @@
     "category": "Productivity",
     "shortDescription": "GAIA — Sovereign AI Companion",
     "longDescription": "GAIA is a sovereign cross-platform AI companion built on alchemical principles, quantum cognition, and deep human-AI partnership."
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/R0GV3TheAlchemist/GAIA-APP/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
