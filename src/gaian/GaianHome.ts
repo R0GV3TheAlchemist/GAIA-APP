@@ -1,6 +1,6 @@
 /**
  * GaianHome.ts
- * The primary Home screen — GAIA’s living room.
+ * The primary Home screen — GAIA's living room.
  *
  * Layout:
  *   ┌──────────────────────────────────────────────────┐
@@ -8,12 +8,12 @@
  *   │                                               │
  *   │            [GaianOrb canvas]                  │
  *   │                                               │
- *   │   “Good morning, Kyle. The room feels quiet.”  │
+ *   │   "Good morning, Kyle. The room feels quiet."  │
  *   │                                               │
  *   │   [ Chat ] [ Memory ] [ Search ] [ Shell ]     │
  *   └──────────────────────────────────────────────────┘
  *
- * The Home screen is NOT a dashboard. It’s a room.
+ * The Home screen is NOT a dashboard. It's a room.
  */
 
 import { GaianOrb }       from './GaianOrb';
@@ -61,12 +61,12 @@ export class GaianHome {
     // ── Greeting
     const greetingEl = document.createElement('p');
     greetingEl.className = 'home-greeting';
-    greetingEl.textContent = buildGreeting({ name: this._recallName() });
+    greetingEl.textContent = buildGreeting(this._recallName());
     this.container.appendChild(greetingEl);
 
     // Refresh greeting every minute (time-of-day may change)
     this._greetingRefresh = window.setInterval(() => {
-      greetingEl.textContent = buildGreeting({ name: this._recallName() });
+      greetingEl.textContent = buildGreeting(this._recallName());
     }, 60_000);
 
     // ── Bottom dock
@@ -142,7 +142,7 @@ export class GaianHome {
 
   private _recallName(): string | undefined {
     // Will be wired to the memory layer in P2
-    // For now, read from localStorage as a simple stub that won’t crash
+    // For now, read from a global stub that won't crash
     try { return window.__gaiaUserName || undefined; } catch { return undefined; }
   }
 
