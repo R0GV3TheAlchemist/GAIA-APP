@@ -1,8 +1,9 @@
-from .admin   import router as admin_router
-from .chat    import router as chat_router
-from .gaians  import router as gaians_router
-from .health  import router as health_router
-from .memory  import router as memory_router
-from .query   import router as query_router
-from .system  import router as system_router
-from .zodiac  import router as zodiac_router
+from .admin    import router as admin_router
+from .chat     import router as chat_router
+from .gaians   import router as gaians_router
+from .health   import router as health_router
+from .memory   import router as memory_router
+from .mood_ws  import router as mood_ws_router
+from .query    import router as query_router
+from .system   import router as system_router
+from .zodiac   import router as zodiac_router
